@@ -40,6 +40,16 @@ class DspEngineTest {
                 )
 
                 assertTrue(
+                    "${profile.name}: Bass gain (${cfg.bassGainDb}) must be between 0 and 6 dB",
+                    cfg.bassGainDb in 0.0f..6.0f
+                )
+
+                assertTrue(
+                    "${profile.name}: Treble gain (${cfg.trebleGainDb}) must be between 0 and 6 dB",
+                    cfg.trebleGainDb in 0.0f..6.0f
+                )
+
+                assertTrue(
                     "${profile.name}: Loudness makeup gain (${cfg.loudnessGainDb}) must be <= 6 dB",
                     cfg.loudnessGainDb in 0.0f..6.0f
                 )

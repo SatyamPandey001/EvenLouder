@@ -26,13 +26,12 @@ class DynamicsEngine(
 
     private fun initialize() {
         try {
-            // Post-EQ disabled (0 bands) to avoid uninitialized biquad filter NaNs
             val builder = Config.Builder(
                 DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
                 channelCount,
                 true, DspConfig.PRE_EQ_BANDS,
                 true, DspConfig.MBC_BANDS,
-                false, 0, // Post-EQ disabled
+                false, 0, // Post-EQ disabled to avoid uninitialized biquad filter NaNs
                 true      // Peak limiter enabled
             )
 
@@ -55,18 +54,19 @@ class DynamicsEngine(
             if (!config.enabled) return
 
             for (ch in 0 until channelCount) {
-                // 1. Pre-EQ: Sub-bass high-pass protection + vocal presence peaking
+                // 1. Pre-EQ: Sub-bass high-pass + 350Hz punch + 2.8kHz vocal + 7.5kHz treble
                 val preEq = fx.getPreEqByChannelIndex(ch)
-                // Band 0: Sub-bass high-pass roll-off
+
+                // Band 0: Sub-bass high-pass roll-off (cuts cone excursion stress)
                 preEq.getBand(0).apply {
                     cutoffFrequency = config.highPassCutoffHz
                     gain = -18f
                     setEnabled(true)
                 }
-                // Band 1: Lower-mid fullness
+                // Band 1: Upper-bass & chest warmth (350 Hz harmonic punch)
                 preEq.getBand(1).apply {
                     cutoffFrequency = 350f
-                    gain = 1.0f
+                    gain = config.bassGainDb.coerceIn(0f, 6f)
                     setEnabled(true)
                 }
                 // Band 2: Mid-range reference
@@ -81,48 +81,47 @@ class DynamicsEngine(
                     gain = config.vocalClarityDb.coerceIn(0f, 6f)
                     setEnabled(true)
                 }
-                // Band 4: Upper presence / crispness
+                // Band 4: Treble crispness & detail (7.5 kHz)
                 preEq.getBand(4).apply {
-                    cutoffFrequency = 7000f
-                    gain = 1.5f
+                    cutoffFrequency = 7500f
+                    gain = config.trebleGainDb.coerceIn(0f, 6f)
                     setEnabled(true)
                 }
-                // Band 5: Ultra-high air
+                // Band 5: Ultra-high air (14 kHz)
                 preEq.getBand(5).apply {
                     cutoffFrequency = 14000f
-                    gain = 0.5f
+                    gain = (config.trebleGainDb * 0.6f).coerceIn(0f, 4f)
                     setEnabled(true)
                 }
                 fx.setPreEqByChannelIndex(ch, preEq)
 
                 // 2. Multi-Band Compressor (Low, Mid, High)
-                // Noise gate explicitly disabled (-90 dB) to prevent gating normal audio to silence
                 val mbc = fx.getMbcByChannelIndex(ch)
                 val makeup = config.loudnessGainDb.coerceIn(0f, 6f)
 
                 // Low band (140Hz - 600Hz)
                 mbc.getBand(0).apply {
                     cutoffFrequency = 600f
-                    threshold = -16f
+                    threshold = -18f
                     ratio = 3.5f
                     attackTime = 12f
                     releaseTime = 80f
                     kneeWidth = 0.0f
-                    noiseGateThreshold = -90.0f // Explicitly disable gate
-                    expanderRatio = 1.0f        // Unity expansion (no gating)
+                    noiseGateThreshold = -90.0f // Explicitly disabled
+                    expanderRatio = 1.0f
                     preGain = 0.0f
-                    postGain = (makeup * 0.8f)
+                    postGain = (makeup * 0.85f)
                     setEnabled(true)
                 }
                 // Mid band (600Hz - 4500Hz)
                 mbc.getBand(1).apply {
                     cutoffFrequency = 4500f
-                    threshold = -14f
+                    threshold = -15f
                     ratio = 2.5f
                     attackTime = 8f
                     releaseTime = 60f
                     kneeWidth = 0.0f
-                    noiseGateThreshold = -90.0f // Explicitly disable gate
+                    noiseGateThreshold = -90.0f
                     expanderRatio = 1.0f
                     preGain = 0.0f
                     postGain = makeup
@@ -131,20 +130,20 @@ class DynamicsEngine(
                 // High band (4500Hz - 20000Hz)
                 mbc.getBand(2).apply {
                     cutoffFrequency = 20000f
-                    threshold = -12f
+                    threshold = -14f
                     ratio = 2.0f
                     attackTime = 5f
                     releaseTime = 50f
                     kneeWidth = 0.0f
-                    noiseGateThreshold = -90.0f // Explicitly disable gate
+                    noiseGateThreshold = -90.0f
                     expanderRatio = 1.0f
                     preGain = 0.0f
-                    postGain = (makeup * 0.6f)
+                    postGain = (makeup * 0.7f)
                     setEnabled(true)
                 }
                 fx.setMbcByChannelIndex(ch, mbc)
 
-                // 3. Peak Limiter: Guard against 0 dBFS clipping & SmartPA excursion ducking
+                // 3. Peak Limiter: Strict -0.5 dBFS ceiling to prevent clipping & SmartPA ducking
                 val limiter = fx.getLimiterByChannelIndex(ch)
                 limiter.apply {
                     threshold = config.limiterCeilingDb.coerceIn(-6f, -0.1f)

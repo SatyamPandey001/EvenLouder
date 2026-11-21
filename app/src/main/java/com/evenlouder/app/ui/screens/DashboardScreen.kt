@@ -118,37 +118,69 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Preset Tuning Profiles
+        // Expanded Preset Tuning Profiles
         Text(
-            text = "ACOUSTIC PROFILES",
+            text = "ACOUSTIC PROFILES (DISTINCT TUNINGS)",
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf(
-                TuningProfile.BALANCED_CLARITY,
-                TuningProfile.VOCAL_FOCUS,
-                TuningProfile.MAX_LOUDNESS
-            ).forEach { profile ->
-                val selected = config.highPassCutoffHz == profile.config.highPassCutoffHz &&
-                        config.vocalClarityDb == profile.config.vocalClarityDb &&
-                        config.loudnessGainDb == profile.config.loudnessGainDb
 
-                FilterChip(
-                    selected = selected,
-                    onClick = { onConfigChange(profile.config.copy(globalHookEnabled = config.globalHookEnabled)) },
-                    label = { Text(profile.title, fontSize = 11.sp, maxLines = 1) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = NeonCyan,
-                        selectedLabelColor = Color.Black
-                    )
-                )
+        // 2x3 Grid of Profiles
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val profiles = listOf(
+                TuningProfile.ULTRA_LOUD,
+                TuningProfile.VOCAL_FOCUS,
+                TuningProfile.BASS_PUNCH,
+                TuningProfile.CRISP_TREBLE,
+                TuningProfile.BALANCED_STUDIO
+            )
+
+            profiles.chunked(2).forEach { rowProfiles ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    rowProfiles.forEach { profile ->
+                        val selected = config.enabled &&
+                                config.highPassCutoffHz == profile.config.highPassCutoffHz &&
+                                config.vocalClarityDb == profile.config.vocalClarityDb &&
+                                config.bassGainDb == profile.config.bassGainDb &&
+                                config.loudnessGainDb == profile.config.loudnessGainDb
+
+                        OutlinedCard(
+                            onClick = {
+                                onConfigChange(profile.config.copy(globalHookEnabled = config.globalHookEnabled))
+                            },
+                            colors = CardDefaults.outlinedCardColors(
+                                containerColor = if (selected) NeonCyan.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface
+                            ),
+                            border = CardDefaults.outlinedCardBorder().copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(if (selected) NeonCyan else Color.Transparent)
+                            ),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    profile.title,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selected) NeonCyan else Color.White
+                                )
+                                Text(
+                                    profile.subtitle,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    if (rowProfiles.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
             }
         }
 
@@ -171,7 +203,7 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Loudness Makeup Gain
+                // Loudness Makeup Gain (MBC)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -195,9 +227,9 @@ fun DashboardScreen(
                     )
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Vocal & Dialogue Clarity
+                // Vocal & Dialogue Clarity (2.8 kHz)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -213,6 +245,58 @@ fun DashboardScreen(
                 Slider(
                     value = config.vocalClarityDb,
                     onValueChange = { onConfigChange(config.copy(vocalClarityDb = it)) },
+                    valueRange = 0f..6f,
+                    steps = 11,
+                    colors = SliderDefaults.colors(
+                        thumbColor = NeonCyan,
+                        activeTrackColor = NeonCyan
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Upper Bass Punch (350 Hz)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Bass Punch / Warmth (350 Hz)", fontSize = 13.sp)
+                    Text(
+                        "+${"%.1f".format(config.bassGainDb)} dB",
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = NeonAmber
+                    )
+                }
+                Slider(
+                    value = config.bassGainDb,
+                    onValueChange = { onConfigChange(config.copy(bassGainDb = it)) },
+                    valueRange = 0f..6f,
+                    steps = 11,
+                    colors = SliderDefaults.colors(
+                        thumbColor = NeonAmber,
+                        activeTrackColor = NeonAmber
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Treble Sparkle (7.5 kHz)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Treble Crispness (7.5 kHz)", fontSize = 13.sp)
+                    Text(
+                        "+${"%.1f".format(config.trebleGainDb)} dB",
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = NeonCyan
+                    )
+                }
+                Slider(
+                    value = config.trebleGainDb,
+                    onValueChange = { onConfigChange(config.copy(trebleGainDb = it)) },
                     valueRange = 0f..6f,
                     steps = 11,
                     colors = SliderDefaults.colors(
@@ -249,7 +333,7 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Built-In Audio Test Generator Card
+        // Built-In Audio Test Player Card
         Card(
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -312,7 +396,7 @@ fun DashboardScreen(
                         color = Color.White
                     )
                     Text(
-                        text = "Apply DSP to Spotify, YouTube Music, etc. Leave OFF when using other apps without tuning.",
+                        text = "Applies tuning to SimpMusic, Spotify, YouTube Music, etc. in real time.",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -348,7 +432,7 @@ fun DashboardScreen(
 
                 if (activeSessions.isEmpty()) {
                     Text(
-                        text = "No media streams currently active. Tap 'Play Test Audio' above to test.",
+                        text = "No media streams currently active. Play music in any app or tap 'Play Test Audio' above.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

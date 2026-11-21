@@ -3,6 +3,7 @@ package com.evenlouder.app.core.session
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -13,6 +14,8 @@ import android.os.IBinder
 import android.util.Log
 import com.evenlouder.app.core.dsp.DspConfig
 import com.evenlouder.app.core.dsp.DynamicsEngine
+import com.evenlouder.app.core.dsp.TuningProfile
+import com.evenlouder.app.ui.MainActivity
 import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -20,19 +23,23 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Foreground Service maintaining hardware-safe DynamicsProcessing sessions.
- * Features automatic active session discovery for third-party media players.
+ * Features automatic active session discovery and expandable notification controls.
  */
 class AudioEngineService : Service() {
 
     companion object {
         private const val TAG = "AudioEngineService"
-        private const val CHANNEL_ID = "evenlouder_audio_channel"
+        private const val CHANNEL_ID = "evenlouder_audio_channel_v2"
         private const val NOTIFICATION_ID = 1001
 
         const val ACTION_ATTACH_SESSION = "com.evenlouder.ACTION_ATTACH_SESSION"
         const val ACTION_DETACH_SESSION = "com.evenlouder.ACTION_DETACH_SESSION"
+        const val ACTION_TOGGLE_DSP = "com.evenlouder.ACTION_TOGGLE_DSP"
+        const val ACTION_SET_PROFILE = "com.evenlouder.ACTION_SET_PROFILE"
+
         const val EXTRA_SESSION_ID = "extra_session_id"
         const val EXTRA_CLIENT_PKG = "extra_client_pkg"
+        const val EXTRA_PROFILE_NAME = "extra_profile_name"
 
         @Volatile
         var instance: AudioEngineService? = null
@@ -51,7 +58,10 @@ class AudioEngineService : Service() {
     private var scannerJob: Job? = null
     private var playbackCallback: AudioManager.AudioPlaybackCallback? = null
 
-    var currentConfig: DspConfig = DspConfig()
+    var currentConfig: DspConfig = TuningProfile.BALANCED_STUDIO.config
+        private set
+
+    var currentProfileName: String = "Balanced Studio"
         private set
 
     override fun onCreate() {
@@ -60,17 +70,35 @@ class AudioEngineService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         registerPlaybackCallback()
+        if (currentConfig.globalHookEnabled) {
+            startSessionScanner()
+        }
         Log.i(TAG, "AudioEngineService started in foreground")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.let {
-            val sessionId = it.getIntExtra(EXTRA_SESSION_ID, 0)
-            val pkg = it.getStringExtra(EXTRA_CLIENT_PKG) ?: "Unknown"
-
             when (it.action) {
-                ACTION_ATTACH_SESSION -> if (sessionId > 0) attachSession(sessionId, pkg)
-                ACTION_DETACH_SESSION -> if (sessionId > 0) detachSession(sessionId)
+                ACTION_ATTACH_SESSION -> {
+                    val sessionId = it.getIntExtra(EXTRA_SESSION_ID, 0)
+                    val pkg = it.getStringExtra(EXTRA_CLIENT_PKG) ?: "External"
+                    if (sessionId > 0) attachSession(sessionId, pkg)
+                }
+                ACTION_DETACH_SESSION -> {
+                    val sessionId = it.getIntExtra(EXTRA_SESSION_ID, 0)
+                    if (sessionId > 0) detachSession(sessionId)
+                }
+                ACTION_TOGGLE_DSP -> {
+                    updateConfig(currentConfig.copy(enabled = !currentConfig.enabled))
+                }
+                ACTION_SET_PROFILE -> {
+                    val profileName = it.getStringExtra(EXTRA_PROFILE_NAME)
+                    val profile = TuningProfile.values().firstOrNull { p -> p.name == profileName }
+                    profile?.let { p ->
+                        currentProfileName = p.title
+                        updateConfig(p.config.copy(globalHookEnabled = currentConfig.globalHookEnabled))
+                    }
+                }
             }
         }
         return START_STICKY
@@ -104,9 +132,12 @@ class AudioEngineService : Service() {
         }
     }
 
-    fun updateConfig(newConfig: DspConfig) {
+    fun updateConfig(newConfig: DspConfig, profileTitle: String? = null) {
         val wasGlobal = currentConfig.globalHookEnabled
         currentConfig = newConfig
+        if (profileTitle != null) {
+            currentProfileName = profileTitle
+        }
 
         for ((_, engine) in activeEngines) {
             engine.applyConfig(newConfig)
@@ -116,7 +147,6 @@ class AudioEngineService : Service() {
             startSessionScanner()
         } else if (!newConfig.globalHookEnabled && wasGlobal) {
             stopSessionScanner()
-            // Detach external players when global hook is turned off
             val external = activeEngines.keys.filter { id ->
                 sessionPackages[id] != "Internal Acoustic Loop"
             }
@@ -153,7 +183,7 @@ class AudioEngineService : Service() {
         scannerJob = serviceScope.launch {
             while (isActive && currentConfig.globalHookEnabled) {
                 scanActiveSessions()
-                delay(1500)
+                delay(1200)
             }
         }
         Log.i(TAG, "Started background audio session scanner")
@@ -178,7 +208,6 @@ class AudioEngineService : Service() {
                     val uid = match.groupValues[3].toIntOrNull() ?: continue
                     val sessionId = match.groupValues[4].toIntOrNull() ?: continue
 
-                    // Ignore self and audioserver
                     if (uid == android.os.Process.myUid() || uid == 1041 || uid == 1000) continue
                     if (sessionId <= 0) continue
 
@@ -190,23 +219,20 @@ class AudioEngineService : Service() {
                 }
             }
 
-            // Clean up any external sessions that have stopped playing
             val stale = activeEngines.keys.filter { id ->
                 sessionPackages[id] != "Internal Acoustic Loop" && !discovered.contains(id)
             }
             for (id in stale) {
                 detachSession(id)
             }
-        } catch (_: Exception) {
-            // Silently ignore if dumpsys permission not granted yet
-        }
+        } catch (_: Exception) {}
     }
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "EvenLouder Audio Tuning Service",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
             description = "Maintains micro-speaker dynamics tuning in the background"
             setShowBadge(false)
@@ -215,19 +241,68 @@ class AudioEngineService : Service() {
         manager.createNotificationChannel(channel)
     }
 
+    private fun createActionPendingIntent(action: String, profileName: String? = null, reqCode: Int): PendingIntent {
+        val intent = Intent(this, AudioEngineService::class.java).apply {
+            this.action = action
+            if (profileName != null) {
+                putExtra(EXTRA_PROFILE_NAME, profileName)
+            }
+        }
+        return PendingIntent.getService(
+            this,
+            reqCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
     private fun buildNotification(): Notification {
         val count = activeEngines.size
-        val statusText = if (currentConfig.enabled) {
-            "DSP Active on $count stream(s) • Limiter: -0.5 dBFS"
+        val isEnabled = currentConfig.enabled
+
+        val toggleLabel = if (isEnabled) "Turn OFF" else "Turn ON"
+        val togglePendingIntent = createActionPendingIntent(ACTION_TOGGLE_DSP, reqCode = 1)
+
+        val ultraLoudPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.ULTRA_LOUD.name, reqCode = 2)
+        val vocalPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.VOCAL_FOCUS.name, reqCode = 3)
+        val bassPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.BASS_PUNCH.name, reqCode = 4)
+
+        val mainActivityIntent = Intent(this, MainActivity::class.java)
+        val contentPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            mainActivityIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val summaryText = if (isEnabled) {
+            "DSP ACTIVE • Profile: $currentProfileName ($count stream${if (count == 1) "" else "s"})"
         } else {
-            "DSP Bypassed"
+            "DSP BYPASSED • Stock Speaker Audio"
+        }
+
+        val expandedDetails = if (isEnabled) {
+            "Current Profile: $currentProfileName\n" +
+                    "Active Streams: $count\n" +
+                    "Loudness: +${"%.1f".format(currentConfig.loudnessGainDb)} dB • Vocal: +${"%.1f".format(currentConfig.vocalClarityDb)} dB • Bass: +${"%.1f".format(currentConfig.bassGainDb)} dB\n" +
+                    "Limiter locked @ -0.5 dBFS"
+        } else {
+            "Audio engine is currently bypassed. Tap Turn ON or select a profile below to activate."
         }
 
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("EvenLouder Hardware Audio Engine")
-            .setContentText(statusText)
+            .setContentTitle("EvenLouder Audio Engine")
+            .setContentText(summaryText)
             .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
+            .setContentIntent(contentPendingIntent)
             .setOngoing(true)
+            .setStyle(Notification.BigTextStyle().bigText(expandedDetails))
+            // Unexpanded and expanded primary action: Turn ON / OFF
+            .addAction(Notification.Action.Builder(null, toggleLabel, togglePendingIntent).build())
+            // Expanded profile actions
+            .addAction(Notification.Action.Builder(null, "Ultra Loud", ultraLoudPendingIntent).build())
+            .addAction(Notification.Action.Builder(null, "Vocal Boost", vocalPendingIntent).build())
+            .addAction(Notification.Action.Builder(null, "Bass Punch", bassPendingIntent).build())
             .build()
     }
 
