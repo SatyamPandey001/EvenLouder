@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
@@ -23,13 +24,13 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Foreground Service maintaining hardware-safe DynamicsProcessing sessions.
- * Features automatic active session discovery and expandable notification controls.
+ * Features automatic active session discovery, clean physical bypass, and silent notifications.
  */
 class AudioEngineService : Service() {
 
     companion object {
         private const val TAG = "AudioEngineService"
-        private const val CHANNEL_ID = "evenlouder_audio_channel_v2"
+        private const val CHANNEL_ID = "evenlouder_audio_channel_v3"
         private const val NOTIFICATION_ID = 1001
 
         const val ACTION_ATTACH_SESSION = "com.evenlouder.ACTION_ATTACH_SESSION"
@@ -96,7 +97,7 @@ class AudioEngineService : Service() {
                     val profile = TuningProfile.values().firstOrNull { p -> p.name == profileName }
                     profile?.let { p ->
                         currentProfileName = p.title
-                        updateConfig(p.config.copy(globalHookEnabled = currentConfig.globalHookEnabled))
+                        updateConfig(p.config.copy(globalHookEnabled = currentConfig.globalHookEnabled), p.title)
                     }
                 }
             }
@@ -108,6 +109,7 @@ class AudioEngineService : Service() {
 
     @Synchronized
     fun attachSession(sessionId: Int, pkg: String = "Internal") {
+        if (!currentConfig.enabled) return // Do not attach effects if user turned DSP OFF
         if (activeEngines.containsKey(sessionId)) return
 
         try {
@@ -134,13 +136,31 @@ class AudioEngineService : Service() {
 
     fun updateConfig(newConfig: DspConfig, profileTitle: String? = null) {
         val wasGlobal = currentConfig.globalHookEnabled
+        val wasEnabled = currentConfig.enabled
         currentConfig = newConfig
         if (profileTitle != null) {
             currentProfileName = profileTitle
         }
 
-        for ((_, engine) in activeEngines) {
-            engine.applyConfig(newConfig)
+        if (!newConfig.enabled && wasEnabled) {
+            // Physically release and clear all DSP engines from AudioFlinger
+            // so the phone speaker returns 100% to pure, unmodified stock audio!
+            for ((_, engine) in activeEngines) {
+                engine.release()
+            }
+            activeEngines.clear()
+            Log.i(TAG, "DSP TURNED OFF: Physically released all effects from hardware channels")
+        } else if (newConfig.enabled && !wasEnabled) {
+            // Re-attached to active media sessions
+            Log.i(TAG, "DSP TURNED ON: Re-scanning and attaching to active sessions")
+            if (newConfig.globalHookEnabled) {
+                serviceScope.launch { scanActiveSessions() }
+            }
+        } else if (newConfig.enabled) {
+            // Apply parameter updates to existing active engines
+            for ((_, engine) in activeEngines) {
+                engine.applyConfig(newConfig)
+            }
         }
 
         if (newConfig.globalHookEnabled && !wasGlobal) {
@@ -167,7 +187,7 @@ class AudioEngineService : Service() {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             playbackCallback = object : AudioManager.AudioPlaybackCallback() {
                 override fun onPlaybackConfigChanged(configs: List<AudioPlaybackConfiguration>) {
-                    if (currentConfig.globalHookEnabled) {
+                    if (currentConfig.globalHookEnabled && currentConfig.enabled) {
                         serviceScope.launch { scanActiveSessions() }
                     }
                 }
@@ -182,7 +202,9 @@ class AudioEngineService : Service() {
         scannerJob?.cancel()
         scannerJob = serviceScope.launch {
             while (isActive && currentConfig.globalHookEnabled) {
-                scanActiveSessions()
+                if (currentConfig.enabled) {
+                    scanActiveSessions()
+                }
                 delay(1200)
             }
         }
@@ -196,6 +218,8 @@ class AudioEngineService : Service() {
     }
 
     private fun scanActiveSessions() {
+        if (!currentConfig.enabled) return
+
         try {
             val process = Runtime.getRuntime().exec("dumpsys media.audio_flinger")
             val reader = BufferedReader(InputStreamReader(process.inputStream))
@@ -236,19 +260,21 @@ class AudioEngineService : Service() {
         ).apply {
             description = "Maintains micro-speaker dynamics tuning in the background"
             setShowBadge(false)
+            setSound(null, null)      // Completely silent: no chimes or beeps on updates
+            enableVibration(false)    // No vibration
         }
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(channel)
     }
 
     private fun createActionPendingIntent(action: String, profileName: String? = null, reqCode: Int): PendingIntent {
-        val intent = Intent(this, AudioEngineService::class.java).apply {
+        val intent = Intent(this, NotificationActionReceiver::class.java).apply {
             this.action = action
             if (profileName != null) {
                 putExtra(EXTRA_PROFILE_NAME, profileName)
             }
         }
-        return PendingIntent.getService(
+        return PendingIntent.getBroadcast(
             this,
             reqCode,
             intent,
@@ -278,7 +304,7 @@ class AudioEngineService : Service() {
         val summaryText = if (isEnabled) {
             "DSP ACTIVE • Profile: $currentProfileName ($count stream${if (count == 1) "" else "s"})"
         } else {
-            "DSP BYPASSED • Stock Speaker Audio"
+            "DSP BYPASSED • Pure Stock Speaker Audio"
         }
 
         val expandedDetails = if (isEnabled) {
@@ -287,7 +313,7 @@ class AudioEngineService : Service() {
                     "Loudness: +${"%.1f".format(currentConfig.loudnessGainDb)} dB • Vocal: +${"%.1f".format(currentConfig.vocalClarityDb)} dB • Bass: +${"%.1f".format(currentConfig.bassGainDb)} dB\n" +
                     "Limiter locked @ -0.5 dBFS"
         } else {
-            "Audio engine is currently bypassed. Tap Turn ON or select a profile below to activate."
+            "DSP is completely released from audio hardware. Tap Turn ON or select a profile to re-engage."
         }
 
         return Notification.Builder(this, CHANNEL_ID)
@@ -296,10 +322,9 @@ class AudioEngineService : Service() {
             .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
             .setContentIntent(contentPendingIntent)
             .setOngoing(true)
+            .setOnlyAlertOnce(true) // Never beep or play sounds when updating state
             .setStyle(Notification.BigTextStyle().bigText(expandedDetails))
-            // Unexpanded and expanded primary action: Turn ON / OFF
             .addAction(Notification.Action.Builder(null, toggleLabel, togglePendingIntent).build())
-            // Expanded profile actions
             .addAction(Notification.Action.Builder(null, "Ultra Loud", ultraLoudPendingIntent).build())
             .addAction(Notification.Action.Builder(null, "Vocal Boost", vocalPendingIntent).build())
             .addAction(Notification.Action.Builder(null, "Bass Punch", bassPendingIntent).build())
@@ -329,5 +354,36 @@ class AudioEngineService : Service() {
         sessionPackages.clear()
         instance = null
         Log.i(TAG, "AudioEngineService destroyed")
+    }
+}
+
+/**
+ * Handles action clicks directly from notifications via Broadcasts.
+ * Broadcasts execute immediately and bypass Android 14/15 background service launch restrictions.
+ */
+class NotificationActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val service = AudioEngineService.instance
+        if (service == null) {
+            val serviceIntent = Intent(context, AudioEngineService::class.java).apply {
+                action = intent.action
+                putExtras(intent)
+            }
+            context.startForegroundService(serviceIntent)
+            return
+        }
+
+        when (intent.action) {
+            AudioEngineService.ACTION_TOGGLE_DSP -> {
+                service.updateConfig(service.currentConfig.copy(enabled = !service.currentConfig.enabled))
+            }
+            AudioEngineService.ACTION_SET_PROFILE -> {
+                val profileName = intent.getStringExtra(AudioEngineService.EXTRA_PROFILE_NAME)
+                val profile = TuningProfile.values().firstOrNull { it.name == profileName }
+                profile?.let { p ->
+                    service.updateConfig(p.config.copy(globalHookEnabled = service.currentConfig.globalHookEnabled), p.title)
+                }
+            }
+        }
     }
 }

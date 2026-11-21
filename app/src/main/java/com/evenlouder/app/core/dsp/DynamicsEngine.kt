@@ -50,12 +50,47 @@ class DynamicsEngine(
         currentConfig = config
 
         try {
-            fx.enabled = config.enabled
-            if (!config.enabled) return
+            if (!config.enabled) {
+                // Neutralize DSP to 100% transparent unity gain across all channels and disable sub-stages
+                for (ch in 0 until channelCount) {
+                    val preEq = fx.getPreEqByChannelIndex(ch)
+                    for (b in 0 until DspConfig.PRE_EQ_BANDS) {
+                        preEq.getBand(b).apply {
+                            gain = 0.0f
+                            setEnabled(false)
+                        }
+                    }
+                    preEq.setEnabled(false)
+                    fx.setPreEqByChannelIndex(ch, preEq)
 
+                    val mbc = fx.getMbcByChannelIndex(ch)
+                    for (b in 0 until DspConfig.MBC_BANDS) {
+                        mbc.getBand(b).apply {
+                            preGain = 0.0f
+                            postGain = 0.0f
+                            setEnabled(false)
+                        }
+                    }
+                    mbc.setEnabled(false)
+                    fx.setMbcByChannelIndex(ch, mbc)
+
+                    val limiter = fx.getLimiterByChannelIndex(ch)
+                    limiter.apply {
+                        postGain = 0.0f
+                        setEnabled(false)
+                    }
+                    limiter.setEnabled(false)
+                    fx.setLimiterByChannelIndex(ch, limiter)
+                }
+                fx.enabled = false
+                return
+            }
+
+            fx.enabled = true
             for (ch in 0 until channelCount) {
                 // 1. Pre-EQ: Sub-bass high-pass + 350Hz punch + 2.8kHz vocal + 7.5kHz treble
                 val preEq = fx.getPreEqByChannelIndex(ch)
+                preEq.setEnabled(true)
 
                 // Band 0: Sub-bass high-pass roll-off (cuts cone excursion stress)
                 preEq.getBand(0).apply {
@@ -97,6 +132,7 @@ class DynamicsEngine(
 
                 // 2. Multi-Band Compressor (Low, Mid, High)
                 val mbc = fx.getMbcByChannelIndex(ch)
+                mbc.setEnabled(true)
                 val makeup = config.loudnessGainDb.coerceIn(0f, 6f)
 
                 // Low band (140Hz - 600Hz)
@@ -145,6 +181,7 @@ class DynamicsEngine(
 
                 // 3. Peak Limiter: Strict -0.5 dBFS ceiling to prevent clipping & SmartPA ducking
                 val limiter = fx.getLimiterByChannelIndex(ch)
+                limiter.setEnabled(true)
                 limiter.apply {
                     threshold = config.limiterCeilingDb.coerceIn(-6f, -0.1f)
                     attackTime = 1.0f
@@ -163,6 +200,7 @@ class DynamicsEngine(
 
     fun release() {
         try {
+            applyConfig(currentConfig.copy(enabled = false))
             effect?.enabled = false
             effect?.release()
         } catch (e: Exception) {

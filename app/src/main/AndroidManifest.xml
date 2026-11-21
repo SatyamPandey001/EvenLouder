@@ -40,6 +40,15 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".core.session.NotificationActionReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.evenlouder.ACTION_TOGGLE_DSP" />
+                <action android:name="com.evenlouder.ACTION_SET_PROFILE" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>
