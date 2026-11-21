@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.evenlouder.app.DspEngineTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-21T17:03:24.681Z" hostname="BILLIONARE" time="0.013">
-  <properties/>
-  <testcase name="testAndroid15AidlBandLimitCompliance" classname="com.evenlouder.app.DspEngineTest" time="0.005"/>
-  <testcase name="testAcousticSafetyProfiles" classname="com.evenlouder.app.DspEngineTest" time="0.008"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

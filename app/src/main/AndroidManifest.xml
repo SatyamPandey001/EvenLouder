@@ -10,15 +10,16 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@android:drawable/ic_lock_silent_mode_off"
+        android:icon="@mipmap/ic_launcher"
         android:label="EvenLouder"
-        android:roundIcon="@android:drawable/ic_lock_silent_mode_off"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.NoActionBar">
+        android:theme="@style/Theme.EvenLouder">
 
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
+            android:theme="@style/Theme.EvenLouder.Starting"
             android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -42,7 +43,7 @@
 
         <receiver
             android:name=".core.session.NotificationActionReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="com.evenlouder.ACTION_TOGGLE_DSP" />
                 <action android:name="com.evenlouder.ACTION_SET_PROFILE" />

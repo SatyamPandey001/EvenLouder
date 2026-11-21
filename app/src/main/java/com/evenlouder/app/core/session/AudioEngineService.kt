@@ -24,7 +24,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Foreground Service maintaining hardware-safe DynamicsProcessing sessions.
- * Features automatic active session discovery, clean physical bypass, and silent notifications.
+ * Features universal active session discovery across browsers, video players, and music apps,
+ * clean physical bypass, and silent notifications.
  */
 class AudioEngineService : Service() {
 
@@ -42,11 +43,27 @@ class AudioEngineService : Service() {
         const val EXTRA_CLIENT_PKG = "extra_client_pkg"
         const val EXTRA_PROFILE_NAME = "extra_profile_name"
 
-        val SESSION_SNIFFER_REGEX = Regex("""(\d+)\s+yes\s+(\d+)/\s*(\d+)\s+(\d+)""")
+        // AudioService PlaybackConfiguration regex (for standard media session dumps)
+        val DUMPSYS_CONFIG_REGEX = Regex("""u/pid:(\d+)/\d+.*?state:(started|paused)\b.*?sessionId:(\d+)""")
+        // AudioService player event regex (package tag is optional so non-media apps are not missed)
+        val DUMPSYS_EVENT_REGEX = Regex("""uid/pid:(\d+)/\d+(?:\s+package:([^\s]+))?.*?session:(\d+)""")
+
+        // AudioFlinger Global session refs table (e.g. "7201 1 15599 10218 com.brave.browser")
+        val AUDIOFLINGER_GLOBAL_REF_REGEX = Regex("""^\s*(\d+)\s+\d+\s+\d+\s+(\d+)\s+([a-zA-Z0-9_.]+)""")
+        // AudioFlinger active tracks table row (e.g. "896 yes 15599/ 10218 7201")
+        val AUDIOFLINGER_TRACK_REGEX = Regex("""\b(?:yes|ACTIVE)\s+(?:(?:\d+/\s*)?(\d+))\s+(\d+)""")
+        val AUDIOFLINGER_ACTIVE_TRACK_REGEX = Regex("""^\s*\S+\s+(\d+)\s+(\d+)\s+ACTIVE\b""")
+        val AUDIOFLINGER_ACTIVE_REGEX = Regex("""Client:\s*(\d+).*?Session:\s*(\d+)""", RegexOption.IGNORE_CASE)
 
         @Volatile
         var instance: AudioEngineService? = null
             private set
+    }
+
+    enum class SessionOrigin {
+        INTERNAL,
+        BROADCAST,
+        AUTO_SNIFFER
     }
 
     inner class LocalBinder : Binder() {
@@ -56,6 +73,8 @@ class AudioEngineService : Service() {
     private val binder = LocalBinder()
     private val activeEngines = ConcurrentHashMap<Int, DynamicsEngine>()
     private val sessionPackages = ConcurrentHashMap<Int, String>()
+    private val sessionOrigins = ConcurrentHashMap<Int, SessionOrigin>()
+    private val missedScanCounts = ConcurrentHashMap<Int, Int>()
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var scannerJob: Job? = null
@@ -110,17 +129,23 @@ class AudioEngineService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     @Synchronized
-    fun attachSession(sessionId: Int, pkg: String = "Internal") {
-        if (!currentConfig.enabled) return // Do not attach effects if user turned DSP OFF
-        if (activeEngines.containsKey(sessionId)) return
+    fun attachSession(sessionId: Int, pkg: String = "Internal", origin: SessionOrigin = SessionOrigin.INTERNAL) {
+        if (activeEngines.containsKey(sessionId)) {
+            if (origin == SessionOrigin.BROADCAST) {
+                sessionOrigins[sessionId] = SessionOrigin.BROADCAST
+                sessionPackages[sessionId] = pkg
+            }
+            return
+        }
 
         try {
             val engine = DynamicsEngine(audioSessionId = sessionId, channelCount = 2)
             engine.applyConfig(currentConfig)
             activeEngines[sessionId] = engine
             sessionPackages[sessionId] = pkg
+            sessionOrigins[sessionId] = origin
             updateNotification()
-            Log.i(TAG, "Attached DSP to session $sessionId ($pkg). Total active: ${activeEngines.size}")
+            Log.i(TAG, "Attached DSP to session $sessionId ($pkg, origin: $origin). Total active: ${activeEngines.size}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed attaching session $sessionId", e)
         }
@@ -128,12 +153,18 @@ class AudioEngineService : Service() {
 
     @Synchronized
     fun detachSession(sessionId: Int) {
+        missedScanCounts.remove(sessionId)
         activeEngines.remove(sessionId)?.let { engine ->
             engine.release()
             sessionPackages.remove(sessionId)
+            sessionOrigins.remove(sessionId)
             updateNotification()
             Log.i(TAG, "Detached DSP from session $sessionId. Remaining: ${activeEngines.size}")
         }
+    }
+
+    fun hasDumpPermission(): Boolean {
+        return checkSelfPermission(android.Manifest.permission.DUMP) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
     @Synchronized
@@ -145,24 +176,17 @@ class AudioEngineService : Service() {
             currentProfileName = profileTitle
         }
 
+        // Apply updated config (or physical bypass) to all tracked sessions
+        for ((_, engine) in activeEngines) {
+            engine.applyConfig(newConfig)
+        }
+
         if (!newConfig.enabled && wasEnabled) {
-            // Physically release and clear all DSP engines from AudioFlinger
-            // so the phone speaker returns 100% to pure, unmodified stock audio!
-            for ((_, engine) in activeEngines) {
-                engine.release()
-            }
-            activeEngines.clear()
-            Log.i(TAG, "DSP TURNED OFF: Physically released all effects from hardware channels")
+            Log.i(TAG, "DSP TURNED OFF: Bypassed all active effects on hardware channels")
         } else if (newConfig.enabled && !wasEnabled) {
-            // Re-attached to active media sessions
-            Log.i(TAG, "DSP TURNED ON: Re-scanning and attaching to active sessions")
+            Log.i(TAG, "DSP TURNED ON: Re-enabled all tracked sessions and scanning for new ones")
             if (newConfig.globalHookEnabled) {
                 serviceScope.launch { scanActiveSessions() }
-            }
-        } else if (newConfig.enabled) {
-            // Apply parameter updates to existing active engines
-            for ((_, engine) in activeEngines) {
-                engine.applyConfig(newConfig)
             }
         }
 
@@ -171,7 +195,7 @@ class AudioEngineService : Service() {
         } else if (!newConfig.globalHookEnabled && wasGlobal) {
             stopSessionScanner()
             val external = activeEngines.keys.filter { id ->
-                sessionPackages[id] != "Internal Acoustic Loop"
+                sessionOrigins[id] != SessionOrigin.INTERNAL
             }
             for (id in external) {
                 detachSession(id)
@@ -190,7 +214,7 @@ class AudioEngineService : Service() {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             playbackCallback = object : AudioManager.AudioPlaybackCallback() {
                 override fun onPlaybackConfigChanged(configs: List<AudioPlaybackConfiguration>) {
-                    if (currentConfig.globalHookEnabled && currentConfig.enabled) {
+                    if (currentConfig.globalHookEnabled) {
                         serviceScope.launch { scanActiveSessions() }
                     }
                 }
@@ -203,15 +227,18 @@ class AudioEngineService : Service() {
 
     private fun startSessionScanner() {
         scannerJob?.cancel()
+        if (!hasDumpPermission()) {
+            Log.i(TAG, "DUMP permission not granted; passive broadcast mode active (zero polling overhead)")
+            return
+        }
         scannerJob = serviceScope.launch {
             while (isActive && currentConfig.globalHookEnabled) {
-                if (currentConfig.enabled) {
-                    scanActiveSessions()
-                }
-                delay(3000)
+                scanActiveSessions()
+                // shortcut: 15s poll saves CPU/battery; AudioPlaybackCallback handles instant stream start/stop events
+                delay(15000)
             }
         }
-        Log.i(TAG, "Started background audio session scanner")
+        Log.i(TAG, "Started background audio session scanner (audioflinger & audio)")
     }
 
     private fun stopSessionScanner() {
@@ -220,43 +247,139 @@ class AudioEngineService : Service() {
         Log.i(TAG, "Stopped background audio session scanner")
     }
 
-    private fun scanActiveSessions() {
-        if (!currentConfig.enabled) return
+    private fun isValidExternalSession(uid: Int, sessionId: Int, pkg: String? = null): Boolean {
+        if (uid == android.os.Process.myUid() || uid == 1000 || uid == 1001 || uid == 1013 || uid == 1041 || uid <= 0) return false
+        if (pkg != null && (pkg.contains("systemui") || pkg.contains("evenlouder"))) return false
+        return sessionId > 0
+    }
 
+    private fun resolvePackageName(uid: Int): String {
+        return packageManager.getPackagesForUid(uid)?.firstOrNull() ?: "App (UID $uid)"
+    }
+
+    private fun parseAudioDump(command: String, discovered: MutableMap<Int, String>) {
         var process: Process? = null
         try {
-            process = Runtime.getRuntime().exec("dumpsys media.audio_flinger")
+            process = Runtime.getRuntime().exec(command)
             val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val discovered = mutableSetOf<Int>()
-
             reader.useLines { lines ->
                 for (line in lines) {
-                    val match = SESSION_SNIFFER_REGEX.find(line) ?: continue
-                    val uid = match.groupValues[3].toIntOrNull() ?: continue
-                    val sessionId = match.groupValues[4].toIntOrNull() ?: continue
+                    // 1. AudioFlinger Global session refs table (e.g. "7201 1 15599 10218 com.brave.browser")
+                    val globalRefMatch = AUDIOFLINGER_GLOBAL_REF_REGEX.find(line)
+                    if (globalRefMatch != null) {
+                        val sessionId = globalRefMatch.groupValues[1].toIntOrNull() ?: continue
+                        val uid = globalRefMatch.groupValues[2].toIntOrNull() ?: continue
+                        val pkg = globalRefMatch.groupValues[3]
+                        if (isValidExternalSession(uid, sessionId, pkg)) {
+                            discovered[sessionId] = pkg
+                        }
+                        continue
+                    }
 
-                    if (uid == android.os.Process.myUid() || uid == 1041 || uid == 1000) continue
-                    if (sessionId <= 0) continue
+                    // 2. AudioFlinger active tracks table row (e.g. "896 yes 15599/ 10218 7201 ...")
+                    val flingerTrackMatch = AUDIOFLINGER_TRACK_REGEX.find(line)
+                    if (flingerTrackMatch != null) {
+                        val uid = flingerTrackMatch.groupValues[1].toIntOrNull() ?: continue
+                        val sessionId = flingerTrackMatch.groupValues[2].toIntOrNull() ?: continue
+                        val pkg = resolvePackageName(uid)
+                        if (isValidExternalSession(uid, sessionId, pkg)) {
+                            discovered[sessionId] = pkg
+                        }
+                        continue
+                    }
 
-                    discovered.add(sessionId)
-                    if (!activeEngines.containsKey(sessionId)) {
-                        val pkgName = packageManager.getPackagesForUid(uid)?.firstOrNull() ?: "App (UID $uid)"
-                        attachSession(sessionId, pkgName)
+                    // 3. AudioFlinger alternative track format (e.g. "1 10080 7721 ACTIVE")
+                    val altTrackMatch = AUDIOFLINGER_ACTIVE_TRACK_REGEX.find(line)
+                    if (altTrackMatch != null) {
+                        val uid = altTrackMatch.groupValues[1].toIntOrNull() ?: continue
+                        val sessionId = altTrackMatch.groupValues[2].toIntOrNull() ?: continue
+                        val pkg = resolvePackageName(uid)
+                        if (isValidExternalSession(uid, sessionId, pkg)) {
+                            discovered[sessionId] = pkg
+                        }
+                        continue
+                    }
+
+                    // 4. AudioFlinger active tracks block (e.g. "Client: 10228, Session: 6601")
+                    val flingerActiveMatch = AUDIOFLINGER_ACTIVE_REGEX.find(line)
+                    if (flingerActiveMatch != null) {
+                        val uid = flingerActiveMatch.groupValues[1].toIntOrNull() ?: continue
+                        val sessionId = flingerActiveMatch.groupValues[2].toIntOrNull() ?: continue
+                        val pkg = resolvePackageName(uid)
+                        if (isValidExternalSession(uid, sessionId, pkg)) {
+                            discovered[sessionId] = pkg
+                        }
+                        continue
+                    }
+
+                    // 5. AudioService PlaybackConfiguration line
+                    val configMatch = DUMPSYS_CONFIG_REGEX.find(line)
+                    if (configMatch != null) {
+                        val uid = configMatch.groupValues[1].toIntOrNull() ?: continue
+                        val state = configMatch.groupValues[2]
+                        val sessionId = configMatch.groupValues[3].toIntOrNull() ?: continue
+                        val pkg = resolvePackageName(uid)
+                        if (isValidExternalSession(uid, sessionId, pkg) && state == "started") {
+                            discovered[sessionId] = pkg
+                        }
+                        continue
+                    }
+
+                    // 6. AudioService player event line (package is optional)
+                    val eventMatch = DUMPSYS_EVENT_REGEX.find(line)
+                    if (eventMatch != null) {
+                        val uid = eventMatch.groupValues[1].toIntOrNull() ?: continue
+                        val explicitPkg = eventMatch.groupValues[2].takeIf { it.isNotBlank() }
+                        val sessionId = eventMatch.groupValues[3].toIntOrNull() ?: continue
+                        val pkg = explicitPkg ?: resolvePackageName(uid)
+                        if (isValidExternalSession(uid, sessionId, pkg)) {
+                            discovered[sessionId] = pkg
+                        }
                     }
                 }
             }
-
-            val stale = activeEngines.keys.filter { id ->
-                sessionPackages[id] != "Internal Acoustic Loop" && !discovered.contains(id)
-            }
-            for (id in stale) {
-                detachSession(id)
-            }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e(TAG, "Error executing $command", e)
         } finally {
             try {
                 process?.destroy()
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun scanActiveSessions() {
+        if (!currentConfig.globalHookEnabled) return
+
+        val discovered = mutableMapOf<Int, String>()
+
+        if (hasDumpPermission()) {
+            parseAudioDump("dumpsys media.audio_flinger", discovered)
+            parseAudioDump("dumpsys audio", discovered)
+        }
+
+        // Attach newly discovered active sessions
+        for ((sessionId, pkg) in discovered) {
+            missedScanCounts[sessionId] = 0
+            if (!activeEngines.containsKey(sessionId)) {
+                attachSession(sessionId, pkg, SessionOrigin.AUTO_SNIFFER)
+            }
+        }
+
+        // Detach sessions only after 2 consecutive missed scans to avoid transient audio drops
+        if (discovered.isNotEmpty()) {
+            val autoSniffed = activeEngines.keys.filter { id ->
+                sessionOrigins[id] == SessionOrigin.AUTO_SNIFFER
+            }
+            for (id in autoSniffed) {
+                if (!discovered.containsKey(id)) {
+                    val missed = (missedScanCounts[id] ?: 0) + 1
+                    missedScanCounts[id] = missed
+                    if (missed >= 2) {
+                        missedScanCounts.remove(id)
+                        detachSession(id)
+                    }
+                }
+            }
         }
     }
 
@@ -333,8 +456,8 @@ class AudioEngineService : Service() {
             .setOnlyAlertOnce(true) // Never beep or play sounds when updating state
             .setStyle(Notification.BigTextStyle().bigText(expandedDetails))
             .addAction(Notification.Action.Builder(null, toggleLabel, togglePendingIntent).build())
-            .addAction(Notification.Action.Builder(null, "Dolby 3D", dolbyPendingIntent).build())
-            .addAction(Notification.Action.Builder(null, "MaxxBass", maxxBassPendingIntent).build())
+            .addAction(Notification.Action.Builder(null, "Cinema 3D", dolbyPendingIntent).build())
+            .addAction(Notification.Action.Builder(null, "Club Bass", maxxBassPendingIntent).build())
             .addAction(Notification.Action.Builder(null, "Hi-Fi", hifiPendingIntent).build())
             .build()
     }
@@ -360,6 +483,8 @@ class AudioEngineService : Service() {
         }
         activeEngines.clear()
         sessionPackages.clear()
+        sessionOrigins.clear()
+        missedScanCounts.clear()
         instance = null
         Log.i(TAG, "AudioEngineService destroyed")
     }

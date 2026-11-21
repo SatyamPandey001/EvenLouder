@@ -33,7 +33,7 @@ class AudioSessionReceiver : BroadcastReceiver() {
         if (sessionId <= 0) return
 
         when (action) {
-            AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION -> service.attachSession(sessionId, packageName)
+            AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION -> service.attachSession(sessionId, packageName, AudioEngineService.SessionOrigin.BROADCAST)
             AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION -> service.detachSession(sessionId)
         }
     }
