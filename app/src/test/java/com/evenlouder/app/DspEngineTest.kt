@@ -45,6 +45,11 @@ class DspEngineTest {
                 )
 
                 assertTrue(
+                    "${profile.name}: Boxiness cut (${cfg.boxinessCutDb}) must be between -6 and 0 dB",
+                    cfg.boxinessCutDb in -6.0f..0.0f
+                )
+
+                assertTrue(
                     "${profile.name}: Treble gain (${cfg.trebleGainDb}) must be between 0 and 6 dB",
                     cfg.trebleGainDb in 0.0f..6.0f
                 )

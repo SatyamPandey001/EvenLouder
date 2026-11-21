@@ -88,26 +88,26 @@ class DynamicsEngine(
 
             fx.enabled = true
             for (ch in 0 until channelCount) {
-                // 1. Pre-EQ: Sub-bass high-pass + 350Hz punch + 2.8kHz vocal + 7.5kHz treble
+                // 1. Pre-EQ: Sub-bass high-pass + 280Hz MaxxBass punch + 950Hz de-box + 2.8kHz vocal + 7.5kHz treble + 13.5kHz air
                 val preEq = fx.getPreEqByChannelIndex(ch)
                 preEq.setEnabled(true)
 
-                // Band 0: Sub-bass high-pass roll-off (cuts cone excursion stress)
+                // Band 0: Sub-bass excursion protection filter
                 preEq.getBand(0).apply {
                     cutoffFrequency = config.highPassCutoffHz
                     gain = -18f
                     setEnabled(true)
                 }
-                // Band 1: Upper-bass & chest warmth (350 Hz harmonic punch)
+                // Band 1: Upper-bass harmonic punch / MaxxBass resonance (280 Hz)
                 preEq.getBand(1).apply {
-                    cutoffFrequency = 350f
+                    cutoffFrequency = 280f
                     gain = config.bassGainDb.coerceIn(0f, 6f)
                     setEnabled(true)
                 }
-                // Band 2: Mid-range reference
+                // Band 2: Anti-Boxiness / Chassis Resonance Dip (950 Hz)
                 preEq.getBand(2).apply {
-                    cutoffFrequency = 1000f
-                    gain = 0.0f
+                    cutoffFrequency = 950f
+                    gain = config.boxinessCutDb.coerceIn(-6f, 0f)
                     setEnabled(true)
                 }
                 // Band 3: Vocal & dialogue presence (2.8 kHz Fletcher-Munson peak)
@@ -122,59 +122,59 @@ class DynamicsEngine(
                     gain = config.trebleGainDb.coerceIn(0f, 6f)
                     setEnabled(true)
                 }
-                // Band 5: Ultra-high air (14 kHz)
+                // Band 5: Spatial air & sparkle (13.5 kHz)
                 preEq.getBand(5).apply {
-                    cutoffFrequency = 14000f
-                    gain = (config.trebleGainDb * 0.6f).coerceIn(0f, 4f)
+                    cutoffFrequency = 13500f
+                    gain = (config.trebleGainDb * 0.7f).coerceIn(0f, 4f)
                     setEnabled(true)
                 }
                 fx.setPreEqByChannelIndex(ch, preEq)
 
-                // 2. Multi-Band Compressor (Low, Mid, High)
+                // 2. Multi-Band Compressor (Mastering-grade Soft-Knee architecture)
                 val mbc = fx.getMbcByChannelIndex(ch)
                 mbc.setEnabled(true)
                 val makeup = config.loudnessGainDb.coerceIn(0f, 6f)
 
-                // Low band (140Hz - 600Hz)
+                // Low band (135Hz - 550Hz) - Tight punch control, soft-knee analog warmth
                 mbc.getBand(0).apply {
-                    cutoffFrequency = 600f
-                    threshold = -18f
+                    cutoffFrequency = 550f
+                    threshold = -16f
                     ratio = 3.5f
-                    attackTime = 12f
+                    attackTime = 14f
                     releaseTime = 80f
-                    kneeWidth = 0.0f
+                    kneeWidth = 5.0f // Smooth soft-knee analog warmth
                     noiseGateThreshold = -90.0f // Explicitly disabled
                     expanderRatio = 1.0f
                     preGain = 0.0f
                     postGain = (makeup * 0.85f)
                     setEnabled(true)
                 }
-                // Mid band (600Hz - 4500Hz)
+                // Mid band (550Hz - 4200Hz) - Dialogue leveling, transparent optical release
                 mbc.getBand(1).apply {
-                    cutoffFrequency = 4500f
-                    threshold = -15f
-                    ratio = 2.5f
-                    attackTime = 8f
-                    releaseTime = 60f
-                    kneeWidth = 0.0f
+                    cutoffFrequency = 4200f
+                    threshold = -13f
+                    ratio = 2.2f
+                    attackTime = 10f
+                    releaseTime = 90f
+                    kneeWidth = 6.0f // Mastering-grade soft knee eliminates pumping
                     noiseGateThreshold = -90.0f
                     expanderRatio = 1.0f
                     preGain = 0.0f
                     postGain = makeup
                     setEnabled(true)
                 }
-                // High band (4500Hz - 20000Hz)
+                // High band (4200Hz - 20000Hz) - High-end air sparkle, fast limiter response
                 mbc.getBand(2).apply {
                     cutoffFrequency = 20000f
-                    threshold = -14f
+                    threshold = -12f
                     ratio = 2.0f
                     attackTime = 5f
-                    releaseTime = 50f
-                    kneeWidth = 0.0f
+                    releaseTime = 60f
+                    kneeWidth = 4.0f
                     noiseGateThreshold = -90.0f
                     expanderRatio = 1.0f
                     preGain = 0.0f
-                    postGain = (makeup * 0.7f)
+                    postGain = (makeup * 0.75f)
                     setEnabled(true)
                 }
                 fx.setMbcByChannelIndex(ch, mbc)
@@ -186,7 +186,7 @@ class DynamicsEngine(
                     threshold = config.limiterCeilingDb.coerceIn(-6f, -0.1f)
                     attackTime = 1.0f
                     releaseTime = 50.0f
-                    ratio = 10f
+                    ratio = 12f
                     linkGroup = 0
                     postGain = 0.0f
                     setEnabled(true)

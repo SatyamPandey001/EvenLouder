@@ -5,11 +5,12 @@ package com.evenlouder.app.core.dsp
  */
 data class DspConfig(
     val enabled: Boolean = true,
-    val highPassCutoffHz: Float = 140f,
-    val bassGainDb: Float = 2.5f,        // 350 Hz harmonic punch / warmth (0 to 6 dB)
-    val vocalClarityDb: Float = 3.5f,    // 2.8 kHz Fletcher-Munson presence (0 to 6 dB)
-    val trebleGainDb: Float = 2.5f,      // 7.5 kHz crispness & detail (0 to 6 dB)
-    val loudnessGainDb: Float = 3.0f,    // Multi-band compressor makeup gain (0 to 6 dB)
+    val highPassCutoffHz: Float = 135f,
+    val bassGainDb: Float = 3.5f,        // 280 Hz harmonic punch / MaxxBass resonance (0 to 6 dB)
+    val boxinessCutDb: Float = -2.5f,    // 950 Hz anti-boxiness / chassis resonance cut (-6 to 0 dB)
+    val vocalClarityDb: Float = 4.5f,    // 2.8 kHz Fletcher-Munson presence (0 to 6 dB)
+    val trebleGainDb: Float = 3.5f,      // 7.5 kHz crispness & detail (0 to 6 dB)
+    val loudnessGainDb: Float = 4.0f,    // Multi-band compressor makeup gain (0 to 6 dB)
     val limiterCeilingDb: Float = -0.5f, // Brickwall safety ceiling
     val globalHookEnabled: Boolean = true // Hook external media players by default
 ) {

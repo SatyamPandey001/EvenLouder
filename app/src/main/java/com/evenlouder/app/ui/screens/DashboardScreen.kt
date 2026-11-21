@@ -131,11 +131,12 @@ fun DashboardScreen(
         // 2x3 Grid of Profiles
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val profiles = listOf(
-                TuningProfile.ULTRA_LOUD,
-                TuningProfile.VOCAL_FOCUS,
-                TuningProfile.BASS_PUNCH,
-                TuningProfile.CRISP_TREBLE,
-                TuningProfile.BALANCED_STUDIO
+                TuningProfile.DOLBY_SPATIAL,
+                TuningProfile.MAXX_BASS,
+                TuningProfile.DIRAC_HIFI,
+                TuningProfile.VOCAL_PRO,
+                TuningProfile.ULTRA_BOOST,
+                TuningProfile.BYPASS
             )
 
             profiles.chunked(2).forEach { rowProfiles ->
@@ -144,11 +145,16 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     rowProfiles.forEach { profile ->
-                        val selected = config.enabled &&
-                                config.highPassCutoffHz == profile.config.highPassCutoffHz &&
-                                config.vocalClarityDb == profile.config.vocalClarityDb &&
-                                config.bassGainDb == profile.config.bassGainDb &&
-                                config.loudnessGainDb == profile.config.loudnessGainDb
+                        val selected = if (!profile.config.enabled) {
+                            !config.enabled
+                        } else {
+                            config.enabled &&
+                                    config.highPassCutoffHz == profile.config.highPassCutoffHz &&
+                                    config.vocalClarityDb == profile.config.vocalClarityDb &&
+                                    config.bassGainDb == profile.config.bassGainDb &&
+                                    config.boxinessCutDb == profile.config.boxinessCutDb &&
+                                    config.loudnessGainDb == profile.config.loudnessGainDb
+                        }
 
                         OutlinedCard(
                             onClick = {
@@ -255,12 +261,12 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Upper Bass Punch (350 Hz)
+                // Upper Bass Punch (280 Hz MaxxBass)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Bass Punch / Warmth (350 Hz)", fontSize = 13.sp)
+                    Text("Harmonic Bass Punch (280 Hz)", fontSize = 13.sp)
                     Text(
                         "+${"%.1f".format(config.bassGainDb)} dB",
                         fontSize = 13.sp,
@@ -276,6 +282,32 @@ fun DashboardScreen(
                     colors = SliderDefaults.colors(
                         thumbColor = NeonAmber,
                         activeTrackColor = NeonAmber
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Chassis Resonance De-Boxing (950 Hz)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Chassis De-Boxing (950 Hz)", fontSize = 13.sp)
+                    Text(
+                        "${"%.1f".format(config.boxinessCutDb)} dB",
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = NeonCyan
+                    )
+                }
+                Slider(
+                    value = config.boxinessCutDb,
+                    onValueChange = { onConfigChange(config.copy(boxinessCutDb = it)) },
+                    valueRange = -6f..0f,
+                    steps = 11,
+                    colors = SliderDefaults.colors(
+                        thumbColor = NeonCyan,
+                        activeTrackColor = NeonCyan
                     )
                 )
 

@@ -59,10 +59,10 @@ class AudioEngineService : Service() {
     private var scannerJob: Job? = null
     private var playbackCallback: AudioManager.AudioPlaybackCallback? = null
 
-    var currentConfig: DspConfig = TuningProfile.BALANCED_STUDIO.config
+    var currentConfig: DspConfig = TuningProfile.DOLBY_SPATIAL.config
         private set
 
-    var currentProfileName: String = "Balanced Studio"
+    var currentProfileName: String = TuningProfile.DOLBY_SPATIAL.title
         private set
 
     override fun onCreate() {
@@ -289,9 +289,9 @@ class AudioEngineService : Service() {
         val toggleLabel = if (isEnabled) "Turn OFF" else "Turn ON"
         val togglePendingIntent = createActionPendingIntent(ACTION_TOGGLE_DSP, reqCode = 1)
 
-        val ultraLoudPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.ULTRA_LOUD.name, reqCode = 2)
-        val vocalPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.VOCAL_FOCUS.name, reqCode = 3)
-        val bassPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.BASS_PUNCH.name, reqCode = 4)
+        val dolbyPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.DOLBY_SPATIAL.name, reqCode = 2)
+        val maxxBassPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.MAXX_BASS.name, reqCode = 3)
+        val hifiPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.DIRAC_HIFI.name, reqCode = 4)
 
         val mainActivityIntent = Intent(this, MainActivity::class.java)
         val contentPendingIntent = PendingIntent.getActivity(
@@ -310,7 +310,7 @@ class AudioEngineService : Service() {
         val expandedDetails = if (isEnabled) {
             "Current Profile: $currentProfileName\n" +
                     "Active Streams: $count\n" +
-                    "Loudness: +${"%.1f".format(currentConfig.loudnessGainDb)} dB • Vocal: +${"%.1f".format(currentConfig.vocalClarityDb)} dB • Bass: +${"%.1f".format(currentConfig.bassGainDb)} dB\n" +
+                    "Loudness: +${"%.1f".format(currentConfig.loudnessGainDb)} dB • Vocal: +${"%.1f".format(currentConfig.vocalClarityDb)} dB • De-Box: ${"%.1f".format(currentConfig.boxinessCutDb)} dB • Bass: +${"%.1f".format(currentConfig.bassGainDb)} dB\n" +
                     "Limiter locked @ -0.5 dBFS"
         } else {
             "DSP is completely released from audio hardware. Tap Turn ON or select a profile to re-engage."
@@ -325,9 +325,9 @@ class AudioEngineService : Service() {
             .setOnlyAlertOnce(true) // Never beep or play sounds when updating state
             .setStyle(Notification.BigTextStyle().bigText(expandedDetails))
             .addAction(Notification.Action.Builder(null, toggleLabel, togglePendingIntent).build())
-            .addAction(Notification.Action.Builder(null, "Ultra Loud", ultraLoudPendingIntent).build())
-            .addAction(Notification.Action.Builder(null, "Vocal Boost", vocalPendingIntent).build())
-            .addAction(Notification.Action.Builder(null, "Bass Punch", bassPendingIntent).build())
+            .addAction(Notification.Action.Builder(null, "Dolby 3D", dolbyPendingIntent).build())
+            .addAction(Notification.Action.Builder(null, "MaxxBass", maxxBassPendingIntent).build())
+            .addAction(Notification.Action.Builder(null, "Hi-Fi", hifiPendingIntent).build())
             .build()
     }
 
