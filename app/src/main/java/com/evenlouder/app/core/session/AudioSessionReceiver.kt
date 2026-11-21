@@ -32,22 +32,9 @@ class AudioSessionReceiver : BroadcastReceiver() {
 
         if (sessionId <= 0) return
 
-        val serviceIntent = Intent(context, AudioEngineService::class.java).apply {
-            putExtra(AudioEngineService.EXTRA_SESSION_ID, sessionId)
-            putExtra(AudioEngineService.EXTRA_CLIENT_PKG, packageName)
-            this.action = when (action) {
-                AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION -> AudioEngineService.ACTION_ATTACH_SESSION
-                AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION -> AudioEngineService.ACTION_DETACH_SESSION
-                else -> null
-            }
-        }
-
-        if (serviceIntent.action != null) {
-            try {
-                context.startForegroundService(serviceIntent)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed forwarding session intent", e)
-            }
+        when (action) {
+            AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION -> service.attachSession(sessionId, packageName)
+            AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION -> service.detachSession(sessionId)
         }
     }
 }

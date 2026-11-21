@@ -2,11 +2,36 @@ package com.evenlouder.app
 
 import com.evenlouder.app.core.dsp.DspConfig
 import com.evenlouder.app.core.dsp.TuningProfile
+import com.evenlouder.app.core.session.AudioEngineService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DspEngineTest {
+
+    @Test
+    fun testAudioFlingerSessionSnifferRegexParsing() {
+        val sampleDumpsysOutput = """
+            Output thread 0xb400007078664760, name AudioOut_D, tid 2048, type 0 (MIXER):
+              Tracks:
+               123 yes 10228/10228 5593 0 0xb40000707758e800 0x70785c4000 00000003 48000
+               124 no  1000/1000   105  0 0xb40000707758e800 0x70785c4000 00000003 48000
+        """.trimIndent()
+
+        val discoveredSessions = mutableListOf<Pair<Int, Int>>()
+        sampleDumpsysOutput.lines().forEach { line ->
+            val match = AudioEngineService.SESSION_SNIFFER_REGEX.find(line)
+            if (match != null) {
+                val uid = match.groupValues[3].toInt()
+                val sessionId = match.groupValues[4].toInt()
+                discoveredSessions.add(uid to sessionId)
+            }
+        }
+
+        assertEquals(1, discoveredSessions.size)
+        assertEquals(10228, discoveredSessions[0].first)
+        assertEquals(5593, discoveredSessions[0].second)
+    }
 
     @Test
     fun testAndroid15AidlBandLimitCompliance() {

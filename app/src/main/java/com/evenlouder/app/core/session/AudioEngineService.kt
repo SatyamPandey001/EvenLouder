@@ -42,6 +42,8 @@ class AudioEngineService : Service() {
         const val EXTRA_CLIENT_PKG = "extra_client_pkg"
         const val EXTRA_PROFILE_NAME = "extra_profile_name"
 
+        val SESSION_SNIFFER_REGEX = Regex("""(\d+)\s+yes\s+(\d+)/\s*(\d+)\s+(\d+)""")
+
         @Volatile
         var instance: AudioEngineService? = null
             private set
@@ -134,6 +136,7 @@ class AudioEngineService : Service() {
         }
     }
 
+    @Synchronized
     fun updateConfig(newConfig: DspConfig, profileTitle: String? = null) {
         val wasGlobal = currentConfig.globalHookEnabled
         val wasEnabled = currentConfig.enabled
@@ -205,7 +208,7 @@ class AudioEngineService : Service() {
                 if (currentConfig.enabled) {
                     scanActiveSessions()
                 }
-                delay(1200)
+                delay(3000)
             }
         }
         Log.i(TAG, "Started background audio session scanner")
@@ -220,15 +223,15 @@ class AudioEngineService : Service() {
     private fun scanActiveSessions() {
         if (!currentConfig.enabled) return
 
+        var process: Process? = null
         try {
-            val process = Runtime.getRuntime().exec("dumpsys media.audio_flinger")
+            process = Runtime.getRuntime().exec("dumpsys media.audio_flinger")
             val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val regex = Regex("""(\d+)\s+yes\s+(\d+)/\s*(\d+)\s+(\d+)""")
             val discovered = mutableSetOf<Int>()
 
             reader.useLines { lines ->
                 for (line in lines) {
-                    val match = regex.find(line) ?: continue
+                    val match = SESSION_SNIFFER_REGEX.find(line) ?: continue
                     val uid = match.groupValues[3].toIntOrNull() ?: continue
                     val sessionId = match.groupValues[4].toIntOrNull() ?: continue
 
@@ -249,7 +252,12 @@ class AudioEngineService : Service() {
             for (id in stale) {
                 detachSession(id)
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        } finally {
+            try {
+                process?.destroy()
+            } catch (_: Exception) {}
+        }
     }
 
     private fun createNotificationChannel() {
