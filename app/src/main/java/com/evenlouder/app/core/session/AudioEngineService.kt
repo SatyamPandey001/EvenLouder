@@ -1,5 +1,6 @@
 package com.evenlouder.app.core.session
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -18,6 +19,7 @@ import android.os.Binder
 import android.os.IBinder
 import android.util.Log
 import com.evenlouder.app.R
+import com.evenlouder.app.core.dsp.AcousticProfileRepository
 import com.evenlouder.app.core.dsp.DspConfig
 import com.evenlouder.app.core.dsp.DynamicsEngine
 import com.evenlouder.app.core.dsp.TuningProfile
@@ -96,10 +98,10 @@ class AudioEngineService : Service() {
     private var playbackCallback: AudioManager.AudioPlaybackCallback? = null
 
     @Volatile
-    var currentConfig: DspConfig = TuningProfile.DOLBY_SPATIAL.config
+    var currentConfig: DspConfig = TuningProfile.PHONE_SPEAKER.config
         private set
 
-    var currentProfileName: String = TuningProfile.DOLBY_SPATIAL.title
+    var currentProfileName: String = TuningProfile.PHONE_SPEAKER.title
         private set
 
     override fun onCreate() {
@@ -263,8 +265,14 @@ class AudioEngineService : Service() {
     }
 
     /** Name of the preset whose values equal [c], or null if the user has customised it. */
-    private fun matchProfileTitle(c: DspConfig): String? =
-        TuningProfile.values().firstOrNull { p ->
+    private fun matchProfileTitle(c: DspConfig): String? {
+        val byId = c.activeProfileId?.let { id ->
+            TuningProfile.values().firstOrNull { it.acousticProfile?.id == id }?.title
+                ?: AcousticProfileRepository.findById(id)?.name
+        }
+        if (byId != null) return byId
+
+        return TuningProfile.values().firstOrNull { p ->
             c.eqEnabled &&
                 p != TuningProfile.BYPASS &&
                 kotlin.math.abs(c.highPassCutoffHz - p.config.highPassCutoffHz) < 0.5f &&
@@ -274,6 +282,7 @@ class AudioEngineService : Service() {
                 kotlin.math.abs(c.trebleGainDb - p.config.trebleGainDb) < 0.05f &&
                 kotlin.math.abs(c.loudnessGainDb - p.config.loudnessGainDb) < 0.05f
         }?.title
+    }
 
     fun hasDumpPermission(): Boolean {
         return checkSelfPermission(android.Manifest.permission.DUMP) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -322,6 +331,7 @@ class AudioEngineService : Service() {
         return activeEngines.keys.map { id -> id to (sessionPackages[id] ?: "Active Stream") }
     }
 
+    @SuppressLint("BlockedPrivateApi")
     private fun extractSessionId(config: AudioPlaybackConfiguration): Int? {
         try {
             val method = config.javaClass.getMethod("getSessionId")
@@ -690,7 +700,8 @@ class AudioEngineService : Service() {
             loudnessGainDb = p.getFloat("loudness", d.loudnessGainDb),
             limiterCeilingDb = p.getFloat("limiter", d.limiterCeilingDb),
             volumeBoostDb = p.getFloat("boost", d.volumeBoostDb),
-            globalHookEnabled = p.getBoolean("hook", d.globalHookEnabled)
+            globalHookEnabled = p.getBoolean("hook", d.globalHookEnabled),
+            activeProfileId = p.getString("active_profile_id", d.activeProfileId)
         )
         currentProfileName = p.getString("profile", currentProfileName) ?: currentProfileName
     }
@@ -710,6 +721,7 @@ class AudioEngineService : Service() {
             .putFloat("boost", c.volumeBoostDb)
             .putBoolean("hook", c.globalHookEnabled)
             .putString("profile", currentProfileName)
+            .putString("active_profile_id", c.activeProfileId)
             .apply()
     }
 

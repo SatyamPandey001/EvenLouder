@@ -1,0 +1,427 @@
+{
+  "database_version": "2.1.0",
+  "generated_at": "2026-11-22T00:00:00Z",
+  "schema_version": "evenlouder_acoustic_v2",
+  "source_registrations": [
+    { "id": "autoeq", "name": "AutoEQ", "license": "MIT / Multi-license", "url": "https://github.com/jaakkopasanen/AutoEq" },
+    { "id": "opra", "name": "OPRA Project", "license": "CC BY-SA 4.0", "url": "https://github.com/opra-project/OPRA" },
+    { "id": "w3c_cookbook", "name": "W3C Audio EQ Cookbook", "license": "Public Domain", "url": "https://www.w3.org/TR/audio-eq-cookbook/" }
+  ],
+  "profiles": [
+    {
+      "id": "phone_speaker_optimized",
+      "name": "Phone Speaker (Balanced)",
+      "category": "PHONE_SPEAKER",
+      "targetDeviceType": "PHONE_SPEAKER",
+      "manufacturer": "Universal Smartphone",
+      "model": "Micro-Transducer",
+      "preampGainDb": -3.8,
+      "author": "EvenLouder Acoustic Lab",
+      "license": "Apache 2.0",
+      "targetCurve": "Generic Micro-Speaker Acoustic Protection",
+      "filters": [
+        { "id": "f1", "type": "HIGH_PASS", "frequencyHz": 140.0, "gainDb": 0.0, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 300.0, "gainDb": 3.0, "qFactor": 1.2, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 950.0, "gainDb": -4.5, "qFactor": 1.4, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 2800.0, "gainDb": 3.5, "qFactor": 1.6, "enabled": true },
+        { "id": "f5", "type": "HIGH_SHELF", "frequencyHz": 5500.0, "gainDb": 3.0, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "phone_speaker_speech",
+      "name": "Phone Speaker (Voice & Call)",
+      "category": "PHONE_SPEAKER",
+      "targetDeviceType": "PHONE_SPEAKER",
+      "manufacturer": "Universal Smartphone",
+      "model": "Micro-Transducer",
+      "preampGainDb": -5.2,
+      "author": "EvenLouder Acoustic Lab",
+      "license": "Apache 2.0",
+      "targetCurve": "Speech Intelligibility Focus",
+      "filters": [
+        { "id": "f1", "type": "HIGH_PASS", "frequencyHz": 160.0, "gainDb": 0.0, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 400.0, "gainDb": -2.5, "qFactor": 1.5, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 950.0, "gainDb": -5.0, "qFactor": 1.5, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 2600.0, "gainDb": 5.5, "qFactor": 1.5, "enabled": true },
+        { "id": "f5", "type": "HIGH_SHELF", "frequencyHz": 6500.0, "gainDb": -2.0, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "sennheiser_hd600_harman",
+      "name": "Sennheiser HD 600",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Sennheiser",
+      "model": "HD 600",
+      "preampGainDb": -5.8,
+      "author": "Oratory1990",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990/harman_over-ear_2018/Sennheiser%20HD%20600",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Harman Over-Ear 2018",
+      "measurementRig": "GRAS 43AG / 45CA",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 105.0, "gainDb": 5.5, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 200.0, "gainDb": -1.8, "qFactor": 1.4, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 1250.0, "gainDb": -1.5, "qFactor": 2.0, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 3200.0, "gainDb": -2.7, "qFactor": 3.0, "enabled": true },
+        { "id": "f5", "type": "PEAKING", "frequencyHz": 5700.0, "gainDb": -5.2, "qFactor": 4.5, "enabled": true },
+        { "id": "f6", "type": "HIGH_SHELF", "frequencyHz": 10000.0, "gainDb": 2.0, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "sennheiser_hd650_harman",
+      "name": "Sennheiser HD 650",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Sennheiser",
+      "model": "HD 650",
+      "preampGainDb": -6.7,
+      "author": "Oratory1990",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990/harman_over-ear_2018/Sennheiser%20HD%20650",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Harman Over-Ear 2018",
+      "measurementRig": "GRAS 43AG / 45CA",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 105.0, "gainDb": 6.5, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 165.0, "gainDb": -1.8, "qFactor": 1.2, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 1300.0, "gainDb": -1.4, "qFactor": 2.0, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 5500.0, "gainDb": -4.0, "qFactor": 3.5, "enabled": true },
+        { "id": "f5", "type": "HIGH_SHELF", "frequencyHz": 9500.0, "gainDb": 2.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "sennheiser_hd560s_harman",
+      "name": "Sennheiser HD 560S",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Sennheiser",
+      "model": "HD 560S",
+      "preampGainDb": -5.5,
+      "author": "Oratory1990",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990/harman_over-ear_2018/Sennheiser%20HD%20560S",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Harman Over-Ear 2018",
+      "measurementRig": "GRAS 43AG",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 105.0, "gainDb": 5.0, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 1400.0, "gainDb": -1.8, "qFactor": 2.0, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 4600.0, "gainDb": -3.5, "qFactor": 3.0, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 7200.0, "gainDb": -2.5, "qFactor": 3.5, "enabled": true },
+        { "id": "f5", "type": "HIGH_SHELF", "frequencyHz": 10000.0, "gainDb": 1.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "sony_wh1000xm4_harman",
+      "name": "Sony WH-1000XM4",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Sony",
+      "model": "WH-1000XM4",
+      "preampGainDb": -5.5,
+      "author": "Oratory1990",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990/harman_over-ear_2018/Sony%20WH-1000XM4",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Harman Over-Ear 2018",
+      "measurementRig": "GRAS 43AG / 45CA",
+      "filters": [
+        { "id": "f1", "type": "PEAKING", "frequencyHz": 45.0, "gainDb": 3.0, "qFactor": 1.2, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 160.0, "gainDb": -4.8, "qFactor": 1.0, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 650.0, "gainDb": -2.2, "qFactor": 1.8, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 1400.0, "gainDb": 1.8, "qFactor": 1.5, "enabled": true },
+        { "id": "f5", "type": "PEAKING", "frequencyHz": 3100.0, "gainDb": 5.2, "qFactor": 1.4, "enabled": true },
+        { "id": "f6", "type": "PEAKING", "frequencyHz": 6200.0, "gainDb": -4.0, "qFactor": 2.5, "enabled": true },
+        { "id": "f7", "type": "HIGH_SHELF", "frequencyHz": 9000.0, "gainDb": 2.0, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "sony_wh1000xm5_harman",
+      "name": "Sony WH-1000XM5",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Sony",
+      "model": "WH-1000XM5",
+      "preampGainDb": -4.8,
+      "author": "AutoEQ / Jaakko Pasanen",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/rtings/harman_over-ear_2018/Sony%20WH-1000XM5",
+      "license": "MIT",
+      "targetCurve": "Harman Over-Ear 2018",
+      "measurementRig": "IEC 60318-4 Coupler",
+      "filters": [
+        { "id": "f1", "type": "PEAKING", "frequencyHz": 60.0, "gainDb": 2.5, "qFactor": 1.1, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 180.0, "gainDb": -3.8, "qFactor": 1.2, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 1100.0, "gainDb": 1.5, "qFactor": 1.4, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 3200.0, "gainDb": 4.5, "qFactor": 1.5, "enabled": true },
+        { "id": "f5", "type": "PEAKING", "frequencyHz": 7000.0, "gainDb": -3.2, "qFactor": 2.8, "enabled": true },
+        { "id": "f6", "type": "HIGH_SHELF", "frequencyHz": 10000.0, "gainDb": 1.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "bose_qc35_ii_harman",
+      "name": "Bose QuietComfort 35 II",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Bose",
+      "model": "QuietComfort 35 II",
+      "preampGainDb": -4.5,
+      "author": "Oratory1990",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990/harman_over-ear_2018/Bose%20QuietComfort%2035%20II",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Harman Over-Ear 2018",
+      "measurementRig": "GRAS 43AG",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 105.0, "gainDb": 4.0, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 220.0, "gainDb": -2.5, "qFactor": 1.2, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 1200.0, "gainDb": 1.8, "qFactor": 1.8, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 3200.0, "gainDb": 2.5, "qFactor": 2.0, "enabled": true },
+        { "id": "f5", "type": "PEAKING", "frequencyHz": 5800.0, "gainDb": -4.5, "qFactor": 3.5, "enabled": true },
+        { "id": "f6", "type": "HIGH_SHELF", "frequencyHz": 10000.0, "gainDb": 1.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "apple_airpods_pro_harman",
+      "name": "Apple AirPods Pro",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Apple",
+      "model": "AirPods Pro",
+      "preampGainDb": -4.5,
+      "author": "Oratory1990",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990/harman_in-ear_2019v2/Apple%20AirPods%20Pro",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Harman In-Ear 2019 v2",
+      "measurementRig": "GRAS 43AG",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 100.0, "gainDb": 4.0, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 240.0, "gainDb": -2.0, "qFactor": 1.3, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 1200.0, "gainDb": -1.5, "qFactor": 2.0, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 4800.0, "gainDb": -3.5, "qFactor": 3.0, "enabled": true },
+        { "id": "f5", "type": "PEAKING", "frequencyHz": 7800.0, "gainDb": -4.2, "qFactor": 3.5, "enabled": true },
+        { "id": "f6", "type": "HIGH_SHELF", "frequencyHz": 10000.0, "gainDb": 2.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "beyerdynamic_dt770_80_harman",
+      "name": "Beyerdynamic DT 770 Pro (80Ω)",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Beyerdynamic",
+      "model": "DT 770 Pro 80 Ohm",
+      "preampGainDb": -5.0,
+      "author": "Oratory1990",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990/harman_over-ear_2018/Beyerdynamic%20DT%20770%2080%20Ohm",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Harman Over-Ear 2018",
+      "measurementRig": "GRAS 43AG",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 105.0, "gainDb": 4.2, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 200.0, "gainDb": -3.0, "qFactor": 1.1, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 1800.0, "gainDb": 2.8, "qFactor": 1.6, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 3500.0, "gainDb": -2.0, "qFactor": 2.5, "enabled": true },
+        { "id": "f5", "type": "PEAKING", "frequencyHz": 5900.0, "gainDb": -6.8, "qFactor": 4.5, "enabled": true },
+        { "id": "f6", "type": "PEAKING", "frequencyHz": 8400.0, "gainDb": -4.5, "qFactor": 3.8, "enabled": true },
+        { "id": "f7", "type": "HIGH_SHELF", "frequencyHz": 11000.0, "gainDb": 1.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "audio_technica_ath_m50x_harman",
+      "name": "Audio-Technica ATH-M50x",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Audio-Technica",
+      "model": "ATH-M50x",
+      "preampGainDb": -4.8,
+      "author": "Oratory1990",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990/harman_over-ear_2018/Audio-Technica%20ATH-M50x",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Harman Over-Ear 2018",
+      "measurementRig": "GRAS 43AG",
+      "filters": [
+        { "id": "f1", "type": "PEAKING", "frequencyHz": 80.0, "gainDb": -1.5, "qFactor": 1.2, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 180.0, "gainDb": -4.0, "qFactor": 1.0, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 450.0, "gainDb": 1.5, "qFactor": 1.8, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 2200.0, "gainDb": 2.5, "qFactor": 2.0, "enabled": true },
+        { "id": "f5", "type": "PEAKING", "frequencyHz": 9200.0, "gainDb": -4.8, "qFactor": 3.5, "enabled": true }
+      ]
+    },
+    {
+      "id": "hifiman_sundara_harman",
+      "name": "Hifiman Sundara",
+      "category": "MEASUREMENT_CORRECTION",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Hifiman",
+      "model": "Sundara",
+      "preampGainDb": -6.0,
+      "author": "Oratory1990",
+      "sourceUrl": "https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990/harman_over-ear_2018/Hifiman%20Sundara",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Harman Over-Ear 2018",
+      "measurementRig": "GRAS 43AG",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 80.0, "gainDb": 5.5, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 750.0, "gainDb": -1.5, "qFactor": 1.6, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 2100.0, "gainDb": 2.2, "qFactor": 1.8, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 6000.0, "gainDb": -3.8, "qFactor": 3.0, "enabled": true },
+        { "id": "f5", "type": "HIGH_SHELF", "frequencyHz": 10000.0, "gainDb": 1.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "sennheiser_hd600_diffuse_field",
+      "name": "Sennheiser HD 600 (Diffuse Field)",
+      "category": "COMMUNITY_PROFILE",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Sennheiser",
+      "model": "HD 600",
+      "preampGainDb": -3.8,
+      "author": "OPRA / AutoEQ Community",
+      "sourceUrl": "https://github.com/opra-project/OPRA",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Diffuse Field ISO 11904-1",
+      "filters": [
+        { "id": "f1", "type": "PEAKING", "frequencyHz": 1500.0, "gainDb": 2.0, "qFactor": 1.5, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 3200.0, "gainDb": 3.5, "qFactor": 2.0, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 6000.0, "gainDb": -3.0, "qFactor": 3.5, "enabled": true }
+      ]
+    },
+    {
+      "id": "sony_wh1000xm4_warm_audiophile",
+      "name": "Sony WH-1000XM4 (Warm Audiophile)",
+      "category": "COMMUNITY_PROFILE",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "Sony",
+      "model": "WH-1000XM4",
+      "preampGainDb": -4.5,
+      "author": "Super* Review (OPRA)",
+      "sourceUrl": "https://github.com/opra-project/OPRA",
+      "license": "CC BY-SA 4.0",
+      "targetCurve": "Warm Audiophile Relaxed Treble",
+      "filters": [
+        { "id": "f1", "type": "PEAKING", "frequencyHz": 180.0, "gainDb": -3.5, "qFactor": 1.2, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 1200.0, "gainDb": 2.0, "qFactor": 1.6, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 3000.0, "gainDb": 3.8, "qFactor": 1.4, "enabled": true },
+        { "id": "f4", "type": "HIGH_SHELF", "frequencyHz": 7500.0, "gainDb": -2.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "creative_deep_bass",
+      "name": "Deep Bass Body",
+      "category": "CREATIVE_SIGNATURE",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "EvenLouder",
+      "model": "Acoustic Tuning Recipe",
+      "preampGainDb": -5.8,
+      "author": "EvenLouder DSP Lab",
+      "license": "Apache 2.0",
+      "targetCurve": "Equal-Loudness Sub-Bass Contour",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 85.0, "gainDb": 5.5, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 180.0, "gainDb": 2.5, "qFactor": 1.4, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 850.0, "gainDb": -3.0, "qFactor": 1.8, "enabled": true },
+        { "id": "f4", "type": "HIGH_SHELF", "frequencyHz": 8000.0, "gainDb": -1.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "creative_studio_reference",
+      "name": "Studio Reference",
+      "category": "CREATIVE_SIGNATURE",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "EvenLouder",
+      "model": "Acoustic Tuning Recipe",
+      "preampGainDb": 0.0,
+      "author": "EvenLouder DSP Lab",
+      "license": "Apache 2.0",
+      "targetCurve": "Linear Flat 20Hz-20kHz",
+      "filters": [
+        { "id": "f1", "type": "PEAKING", "frequencyHz": 1000.0, "gainDb": 0.0, "qFactor": 1.414, "enabled": true }
+      ]
+    },
+    {
+      "id": "creative_vocal_focus",
+      "name": "Vocal Clarity & Presence",
+      "category": "CREATIVE_SIGNATURE",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "EvenLouder",
+      "model": "Acoustic Tuning Recipe",
+      "preampGainDb": -4.5,
+      "author": "EvenLouder DSP Lab",
+      "license": "Apache 2.0",
+      "targetCurve": "Vocal Intelligibility Index (ANSI S3.5)",
+      "filters": [
+        { "id": "f1", "type": "HIGH_PASS", "frequencyHz": 75.0, "gainDb": 0.0, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 350.0, "gainDb": -2.0, "qFactor": 1.5, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 2800.0, "gainDb": 4.2, "qFactor": 1.8, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 6500.0, "gainDb": -2.5, "qFactor": 2.5, "enabled": true },
+        { "id": "f5", "type": "HIGH_SHELF", "frequencyHz": 10000.0, "gainDb": 1.0, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "creative_treble_air",
+      "name": "Treble Detail & Air",
+      "category": "CREATIVE_SIGNATURE",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "EvenLouder",
+      "model": "Acoustic Tuning Recipe",
+      "preampGainDb": -4.2,
+      "author": "EvenLouder DSP Lab",
+      "license": "Apache 2.0",
+      "targetCurve": "High Frequency Brilliance Contour",
+      "filters": [
+        { "id": "f1", "type": "PEAKING", "frequencyHz": 900.0, "gainDb": -2.0, "qFactor": 1.6, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 4500.0, "gainDb": 2.0, "qFactor": 2.0, "enabled": true },
+        { "id": "f3", "type": "HIGH_SHELF", "frequencyHz": 7500.0, "gainDb": 4.0, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "creative_warm_acoustic",
+      "name": "Warm Acoustic & Strings",
+      "category": "CREATIVE_SIGNATURE",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "EvenLouder",
+      "model": "Acoustic Tuning Recipe",
+      "preampGainDb": -3.2,
+      "author": "EvenLouder DSP Lab",
+      "license": "Apache 2.0",
+      "targetCurve": "Warm Acoustic Tilt Curve",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 220.0, "gainDb": 3.0, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 1100.0, "gainDb": -1.5, "qFactor": 1.4, "enabled": true },
+        { "id": "f3", "type": "HIGH_SHELF", "frequencyHz": 7000.0, "gainDb": -3.0, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "creative_cinematic",
+      "name": "Cinematic Immersion",
+      "category": "CREATIVE_SIGNATURE",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "EvenLouder",
+      "model": "Acoustic Tuning Recipe",
+      "preampGainDb": -4.8,
+      "author": "EvenLouder DSP Lab",
+      "license": "Apache 2.0",
+      "targetCurve": "Theatrical Audio Curve",
+      "filters": [
+        { "id": "f1", "type": "LOW_SHELF", "frequencyHz": 90.0, "gainDb": 4.5, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 400.0, "gainDb": -2.5, "qFactor": 1.6, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 2800.0, "gainDb": 3.2, "qFactor": 1.8, "enabled": true },
+        { "id": "f4", "type": "HIGH_SHELF", "frequencyHz": 9500.0, "gainDb": 3.5, "qFactor": 0.71, "enabled": true }
+      ]
+    },
+    {
+      "id": "creative_podcast",
+      "name": "Podcast & Audiobook",
+      "category": "CREATIVE_SIGNATURE",
+      "targetDeviceType": "HEADPHONES",
+      "manufacturer": "EvenLouder",
+      "model": "Acoustic Tuning Recipe",
+      "preampGainDb": -4.8,
+      "author": "EvenLouder DSP Lab",
+      "license": "Apache 2.0",
+      "targetCurve": "Broadcast Voice Standardization",
+      "filters": [
+        { "id": "f1", "type": "HIGH_PASS", "frequencyHz": 95.0, "gainDb": 0.0, "qFactor": 0.71, "enabled": true },
+        { "id": "f2", "type": "PEAKING", "frequencyHz": 300.0, "gainDb": -3.0, "qFactor": 1.6, "enabled": true },
+        { "id": "f3", "type": "PEAKING", "frequencyHz": 2500.0, "gainDb": 4.5, "qFactor": 1.5, "enabled": true },
+        { "id": "f4", "type": "PEAKING", "frequencyHz": 6800.0, "gainDb": -3.5, "qFactor": 2.5, "enabled": true }
+      ]
+    }
+  ]
+}

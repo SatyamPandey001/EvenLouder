@@ -30,30 +30,31 @@ object EqLayout {
         gain / (1f + exp(-2.2f * log2(fc / f0)))
 
     fun build(config: DspConfig): List<EqPoint> {
-        check(FIXED_EDGES.size + 3 == PRE_EQ_BAND_COUNT)
+        return evaluateFit(config).fittedPoints
+    }
+
+    fun evaluateFit(config: DspConfig): FitEvaluationResult {
         val hpf = config.highPassCutoffHz.coerceIn(80f, 180f)
         val on = config.eqEnabled
-        val bass = if (on) config.bassGainDb.coerceIn(0f, 10f) else 0f
+        val bass = if (on) config.bassGainDb.coerceIn(-10f, 10f) else 0f
         val box = if (on) config.boxinessCutDb.coerceIn(-10f, 0f) else 0f
         val vocal = if (on) config.vocalClarityDb.coerceIn(-6f, 10f) else 0f
         val treble = if (on) config.trebleGainDb.coerceIn(-6f, 10f) else 0f
 
-        val out = ArrayList<EqPoint>(PRE_EQ_BAND_COUNT)
-        out += EqPoint(hpf * 0.5f, -24f)
-        out += EqPoint(hpf * 0.75f, -14f)
-        out += EqPoint(hpf, -6f)
+        val profile = if (on) config.activeProfileId?.let { AcousticProfileRepository.findById(it) } else null
 
-        var low = hpf
-        for (edge in FIXED_EDGES) {
-            val fc = sqrt(low * edge)
-            val g = bell(fc, 300f, 0.8f, bass) +
+        val manualOffsets: (Float) -> Float = { fc ->
+            bell(fc, 300f, 0.8f, bass) +
                 bell(fc, 950f, 0.7f, box) +
                 bell(fc, 2800f, 0.9f, vocal) +
                 shelf(fc, 5500f, treble)
-            out += EqPoint(edge, g.coerceIn(-15f, 12f))
-            low = edge
         }
-        return out
+
+        return ParametricBandFitter.fit(
+            profile = profile,
+            hpfHz = hpf,
+            manualOffsets = manualOffsets
+        )
     }
 }
 
@@ -139,8 +140,12 @@ class DynamicsEngine(
         val boost = c.volumeBoostDb.coerceIn(0f, DspConfig.MAX_BOOST_DB)
         val eq = EqLayout.build(c)
         val peak = eq.maxOf { it.gainDb }.coerceAtLeast(0f)
-        // Headroom trim only matters when EQ boosts; boost-only mode has none.
-        val trim = if (c.eqEnabled) (peak * 0.5f).coerceAtMost(4f) else 0f
+        val profilePreamp = c.activeProfileId?.let { AcousticProfileRepository.findById(it)?.preampGainDb } ?: 0f
+        // Headroom trim: ensures cumulative boost does not clip digital output
+        val trim = if (c.eqEnabled) {
+            val neededTrim = if (profilePreamp < 0f) -profilePreamp else (peak * 0.5f)
+            neededTrim.coerceIn(0f, 8f)
+        } else 0f
         fx.setInputGainAllChannelsTo(boost - trim)
 
         val makeup = if (c.eqEnabled) c.loudnessGainDb.coerceIn(0f, 6f) else 0f

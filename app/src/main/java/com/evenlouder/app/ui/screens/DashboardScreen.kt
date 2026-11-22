@@ -73,7 +73,9 @@ fun DashboardScreen(
     val activeProfile = TuningProfile.values().firstOrNull { it != TuningProfile.BYPASS && it.matchesConfig(config) }
     val headline = when {
         config.enabled && !config.eqEnabled && config.volumeBoostDb > 0.05f -> "Volume boost"
-        else -> activeProfile?.title ?: "Custom"
+        else -> activeProfile?.title
+            ?: config.activeProfileId?.let { com.evenlouder.app.core.dsp.AcousticProfileRepository.findById(it)?.name }
+            ?: "Custom"
     }
     val onTune: (DspConfig) -> Unit = { onConfigChange(it.copy(eqEnabled = true)) }
     val statusLine = when {

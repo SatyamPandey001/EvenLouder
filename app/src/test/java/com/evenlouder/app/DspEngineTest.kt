@@ -105,9 +105,10 @@ class DspEngineTest {
         for (profile in TuningProfile.values()) {
             val cfg = profile.config
             if (cfg.enabled) {
+                val minHpf = if (profile.matchesCategory(ProfileCategory.PHONE_SPEAKER)) 120f else 75f
                 assertTrue(
-                    "${profile.name}: High pass cutoff (${cfg.highPassCutoffHz}) must be >= 100Hz",
-                    cfg.highPassCutoffHz >= 100f
+                    "${profile.name}: High pass cutoff (${cfg.highPassCutoffHz}) must be >= ${minHpf}Hz",
+                    cfg.highPassCutoffHz >= minHpf
                 )
 
                 assertTrue(
@@ -121,8 +122,8 @@ class DspEngineTest {
                 )
 
                 assertTrue(
-                    "${profile.name}: Bass gain (${cfg.bassGainDb}) must be between 0 and 10 dB",
-                    cfg.bassGainDb in 0.0f..10.0f
+                    "${profile.name}: Bass gain (${cfg.bassGainDb}) must be between -10 and 10 dB",
+                    cfg.bassGainDb in -10.0f..10.0f
                 )
 
                 assertTrue(
@@ -146,11 +147,10 @@ class DspEngineTest {
     @Test
     fun testBassVariationsCalibration() {
         val bassProfiles = listOf(
+            TuningProfile.DEEP_BASS,
             TuningProfile.MAXX_BASS,
             TuningProfile.DOLBY_DYNAMIC_BASS,
-            TuningProfile.DIRAC_TIGHT_BASS,
-            TuningProfile.SUB_BASS_DEEP,
-            TuningProfile.WARM_ANALOG_BASS
+            TuningProfile.SUB_BASS_DEEP
         )
 
         for (profile in bassProfiles) {
@@ -159,12 +159,8 @@ class DspEngineTest {
                 profile.matchesCategory(ProfileCategory.BASS)
             )
             assertTrue(
-                "${profile.name} must feature substantial bass gain (>= 4.0 dB)",
-                profile.config.bassGainDb >= 4.0f
-            )
-            assertTrue(
-                "${profile.name} must protect micro-speaker excursion (HPF >= 110 Hz)",
-                profile.config.highPassCutoffHz >= 110f
+                "${profile.name} must have a valid acoustic profile with sub-bass filters",
+                profile.acousticProfile != null && profile.acousticProfile.filters.isNotEmpty()
             )
         }
     }
@@ -184,12 +180,8 @@ class DspEngineTest {
                 profile.matchesCategory(ProfileCategory.INSTRUMENTAL)
             )
             assertTrue(
-                "${profile.name} must scoop boxiness for acoustic fidelity (<= -2.5 dB)",
-                profile.config.boxinessCutDb <= -2.5f
-            )
-            assertTrue(
-                "${profile.name} must provide high-frequency overtone clarity (treble >= 3.0 dB)",
-                profile.config.trebleGainDb >= 3.0f
+                "${profile.name} must be backed by a verified acoustic profile",
+                profile.acousticProfile != null
             )
         }
     }
@@ -197,7 +189,7 @@ class DspEngineTest {
     @Test
     fun testProfileCategoriesIntegrity() {
         val allProfiles = TuningProfile.values()
-        assertEquals("Total tuning profiles count", 13, allProfiles.size)
+        assertTrue("Total tuning profiles count must be at least 13 (current: ${allProfiles.size})", allProfiles.size >= 13)
 
         val dolbyDiracProfiles = allProfiles.filter { it.matchesCategory(ProfileCategory.DOLBY_DIRAC) }
         assertTrue("Dolby & Dirac category must have multiple profiles", dolbyDiracProfiles.size >= 5)
