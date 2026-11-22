@@ -43,7 +43,7 @@ class EvenLouderWidget : AppWidgetProvider() {
         private fun buildViews(context: Context): RemoteViews {
             val prefs = context.getSharedPreferences("evenlouder_prefs", Context.MODE_PRIVATE)
             val enabled = prefs.getBoolean("enabled", true)
-            val profile = prefs.getString("profile", null) ?: TuningProfile.DOLBY_SPATIAL.title
+            val profile = prefs.getString("profile", null) ?: TuningProfile.CINEMATIC.title
 
             return RemoteViews(context.packageName, R.layout.widget_evenlouder).apply {
                 setTextViewText(R.id.widget_status, if (enabled) "Tuning on" else "Bypassed")

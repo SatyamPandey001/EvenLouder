@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -32,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import com.evenlouder.app.core.dsp.DspConfig
 import com.evenlouder.app.core.dsp.TuningProfile
 import com.evenlouder.app.core.dsp.applyingProfile
+import com.evenlouder.app.core.session.EvenLouderMediaNotificationListener
+import com.evenlouder.app.tools.ShizukuHelper
 import com.evenlouder.app.ui.components.DspCurveVisualizer
 import com.evenlouder.app.ui.components.EvenLouderLoader
 import com.evenlouder.app.ui.components.LoaderVariant
@@ -70,7 +73,7 @@ fun DashboardScreen(
     var showFineTune by remember { mutableStateOf(false) }
     var comparing by remember { mutableStateOf(false) }
 
-    val activeProfile = TuningProfile.values().firstOrNull { it != TuningProfile.BYPASS && it.matchesConfig(config) }
+    val activeProfile = TuningProfile.canonicalProfiles.firstOrNull { it.matchesConfig(config) }
     val headline = when {
         config.enabled && !config.eqEnabled && config.volumeBoostDb > 0.05f -> "Volume boost"
         else -> activeProfile?.title
@@ -255,7 +258,7 @@ fun DashboardScreen(
                         }
                         TextButton(
                             onClick = {
-                                onConfigChange(config.applyingProfile(TuningProfile.DIRAC_HIFI))
+                                onConfigChange(config.applyingProfile(TuningProfile.STUDIO_REFERENCE))
                             },
                             modifier = Modifier.padding(top = 4.dp)
                         ) { Text("Reset to Balanced") }
@@ -372,6 +375,18 @@ private fun SettingsSheet(
             ) { onConfigChange(config.copy(globalHookEnabled = it)) }
 
             if (config.globalHookEnabled && !isDumpPermissionGranted) {
+                val context = LocalContext.current
+                var isShizukuAvailable by remember { mutableStateOf(ShizukuHelper.isShizukuAvailable()) }
+                var hasShizukuPerm by remember { mutableStateOf(ShizukuHelper.hasShizukuPermission()) }
+                var isNotifListenerGranted by remember { mutableStateOf(EvenLouderMediaNotificationListener.isGranted(context)) }
+
+                LaunchedEffect(Unit) {
+                    ShizukuHelper.registerPermissionListener {
+                        hasShizukuPerm = true
+                        ShizukuHelper.grantDumpPermissionViaShizuku(context)
+                    }
+                }
+
                 Spacer(Modifier.height(8.dp))
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -379,37 +394,141 @@ private fun SettingsSheet(
                     border = BorderStroke(1.dp, border),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Want browsers and video apps too?", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("Want browsers & video apps too?", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "Run this once from a computer with USB debugging on. Tap to copy.",
-                            fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
+                            "Grant permission directly on your phone without a PC using any of these methods:",
+                            fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
                         )
+
+                        // Method 1: Shizuku
+                        Text("1. Shizuku (1-Tap Grant on Phone)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            if (isShizukuAvailable) "Shizuku is active! Tap below to grant permission instantly."
+                            else "Shizuku is not running. Start Shizuku via Wireless Debugging on your phone.",
+                            fontSize = 11.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                        )
+                        if (isShizukuAvailable) {
+                            Button(
+                                onClick = {
+                                    if (hasShizukuPerm) {
+                                        ShizukuHelper.grantDumpPermissionViaShizuku(context)
+                                    } else {
+                                        ShizukuHelper.requestShizukuPermission()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().height(36.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                Text(if (hasShizukuPerm) "Grant Permission Now" else "Authorize via Shizuku", fontSize = 12.sp)
+                            }
+                            Spacer(Modifier.height(10.dp))
+                        }
+
+                        // Method 2: Wireless Debugging / LADB / Termux Shell
+                        Text("2. Wireless Debugging / LADB / Termux (No PC)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "Tap either command to copy for your shell app:",
+                            fontSize = 11.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                        )
+
+                        val shellCommand = "pm grant com.evenlouder.app android.permission.DUMP"
+                        var copiedShell by remember { mutableStateOf(false) }
+
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.surface,
                             border = BorderStroke(1.dp, border),
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                clipboard.setText(AnnotatedString(adbCommand))
-                                copied = true
-                            }
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    clipboard.setText(AnnotatedString(shellCommand))
+                                    copiedShell = true
+                                    copied = false
+                                }
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    adbCommand, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("For LADB / Termux / Device Shell:", fontSize = 10.sp, color = muted)
+                                    Text(
+                                        shellCommand, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Icon(
+                                    if (copiedShell) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
+                                    contentDescription = if (copiedShell) "Copied" else "Copy shell command",
+                                    tint = if (copiedShell) green else muted, modifier = Modifier.size(16.dp)
                                 )
+                            }
+                        }
+
+                        Spacer(Modifier.height(6.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, border),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    clipboard.setText(AnnotatedString(adbCommand))
+                                    copied = true
+                                    copiedShell = false
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("For PC ADB Terminal:", fontSize = 10.sp, color = muted)
+                                    Text(
+                                        adbCommand, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                                 Spacer(Modifier.width(8.dp))
                                 Icon(
                                     if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
-                                    contentDescription = if (copied) "Copied" else "Copy command",
+                                    contentDescription = if (copied) "Copied" else "Copy ADB command",
                                     tint = if (copied) green else muted, modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
+                        Spacer(Modifier.height(10.dp))
+
+                        // Method 3: Notification Listener Access (Standard System Settings)
+                        Text("3. Notification Access (Standard Settings)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "Grant Notification Listener access in Android settings to detect active playback.",
+                            fontSize = 11.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                        )
+                        OutlinedButton(
+                            onClick = { EvenLouderMediaNotificationListener.openSettings(context) },
+                            modifier = Modifier.fillMaxWidth().height(36.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                if (isNotifListenerGranted) "Notification Access Granted ✓" else "Open System Settings",
+                                fontSize = 12.sp,
+                                color = if (isNotifListenerGranted) green else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+
+                        // Method 4: Classic PC ADB
+                        Text("4. Classic USB Debugging (PC)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "Connect to a PC with USB debugging on and run the command copied above in terminal.",
+                            fontSize = 11.sp, color = muted, modifier = Modifier.padding(top = 2.dp)
+                        )
                     }
                 }
             }

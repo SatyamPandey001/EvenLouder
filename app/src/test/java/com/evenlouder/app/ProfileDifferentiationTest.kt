@@ -101,4 +101,35 @@ class ProfileDifferentiationTest {
         assertFalse("Sennheiser HD 600 must not match AirPods Pro config", TuningProfile.SENNHEISER_HD600.matchesConfig(airpodsConfig))
         assertTrue("AirPods Pro must match AirPods Pro config", TuningProfile.AIRPODS_PRO.matchesConfig(airpodsConfig))
     }
+
+    @Test
+    fun testCanonicalProfilesUnambiguousSelection() {
+        val canonical = TuningProfile.canonicalProfiles
+        assertEquals("Must have exactly 15 canonical calibrated profiles", 15, canonical.size)
+
+        // All 15 canonical profiles must have unique titles and unique activeProfileIds
+        val titles = canonical.map { it.title }
+        assertEquals("All canonical titles must be unique", titles.toSet().size, titles.size)
+
+        val profileIds = canonical.mapNotNull { it.config.activeProfileId }
+        assertEquals("All canonical activeProfileIds must be unique", profileIds.toSet().size, profileIds.size)
+
+        val baseConfig = DspConfig()
+        for (profile in canonical) {
+            val config = baseConfig.applyingProfile(profile)
+            // Active selection in UI must resolve directly to this exact profile
+            val resolved = canonical.firstOrNull { it.matchesConfig(config) }
+            assertEquals("Applying ${profile.name} must resolve to itself", profile, resolved)
+
+            // None of the other 14 canonical profiles should match
+            for (other in canonical) {
+                if (other != profile) {
+                    assertFalse(
+                        "${other.name} must not match config of ${profile.name}",
+                        other.matchesConfig(config)
+                    )
+                }
+            }
+        }
+    }
 }

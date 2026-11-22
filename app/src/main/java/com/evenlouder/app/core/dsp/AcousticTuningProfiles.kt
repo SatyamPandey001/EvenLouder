@@ -21,7 +21,7 @@ fun DspConfig.applyingProfile(profile: TuningProfile): DspConfig =
         eqEnabled = true,
         volumeBoostDb = volumeBoostDb,
         globalHookEnabled = globalHookEnabled,
-        activeProfileId = profile.acousticProfile?.id ?: activeProfileId
+        activeProfileId = profile.acousticProfile?.id ?: activeProfileId,
     )
 
 /**
@@ -35,7 +35,8 @@ enum class TuningProfile(
     val description: String,
     val config: DspConfig,
     val categories: Set<ProfileCategory>,
-    val acousticProfile: AcousticProfile?
+    val acousticProfile: AcousticProfile?,
+    val isCanonical: Boolean = true,
 ) {
     // --- CATEGORY A: VERIFIED MEASUREMENT CORRECTIONS ---
     SENNHEISER_HD600(
@@ -165,92 +166,111 @@ enum class TuningProfile(
         DeterministicCreativeRecipes.RECIPES[4]
     ),
 
-    // --- BACKWARD COMPATIBLE ALIASES ---
+    // --- BACKWARD COMPATIBLE ALIASES (Non-canonical duplicate presets) ---
     DOLBY_SPATIAL(
         "Cinema Clarity", "Dialogue & Air",
         "Clear dialogue and bright detail. Backed by deterministic W3C biquad filter formulation.",
         DspConfig(activeProfileId = "creative_cinematic", highPassCutoffHz = 90f),
         setOf(ProfileCategory.DOLBY_DIRAC),
-        DeterministicCreativeRecipes.RECIPES[5]
+        DeterministicCreativeRecipes.RECIPES[5],
+        isCanonical = false
     ),
     MAXX_BASS(
         "Bass Boost", "Upper-Bass Body",
         "Full low-end lift backed by Fletcher-Munson equal-loudness biquad filters.",
         DspConfig(activeProfileId = "creative_deep_bass", highPassCutoffHz = 85f),
         setOf(ProfileCategory.BASS),
-        DeterministicCreativeRecipes.RECIPES[0]
+        DeterministicCreativeRecipes.RECIPES[0],
+        isCanonical = false
     ),
     DIRAC_HIFI(
         "Balanced Reference", "Neutral & Natural",
         "Flat transmission baseline with uncolored frequency response.",
         DspConfig(activeProfileId = "creative_studio_reference", highPassCutoffHz = 80f),
         setOf(ProfileCategory.DOLBY_DIRAC, ProfileCategory.INSTRUMENTAL),
-        DeterministicCreativeRecipes.RECIPES[1]
+        DeterministicCreativeRecipes.RECIPES[1],
+        isCanonical = false
     ),
     ULTRA_BOOST(
         "Max Volume", "Loudest Preset",
         "Optimized micro-speaker tuning paired with maximum dynamic headroom.",
         DspConfig(activeProfileId = "phone_speaker_optimized", highPassCutoffHz = 140f, loudnessGainDb = 5f),
         emptySet(),
-        AcousticProfileRepository.PHONE_SPEAKER_OPTIMIZED
+        AcousticProfileRepository.PHONE_SPEAKER_OPTIMIZED,
+        isCanonical = false
     ),
     DOLBY_DYNAMIC_BASS(
         "Deep Bass Body", "Full Low-End",
         "Strong sub-bass response with acoustic resonance attenuation.",
         DspConfig(activeProfileId = "creative_deep_bass", highPassCutoffHz = 85f),
         setOf(ProfileCategory.BASS, ProfileCategory.DOLBY_DIRAC),
-        DeterministicCreativeRecipes.RECIPES[0]
+        DeterministicCreativeRecipes.RECIPES[0],
+        isCanonical = false
     ),
     DIRAC_TIGHT_BASS(
         "Tight Punch", "Clean Kick & Bass",
         "Measured acoustic correction with controlled low-frequency transient speed.",
         DspConfig(activeProfileId = "sennheiser_hd600_harman", highPassCutoffHz = 80f),
         setOf(ProfileCategory.BASS, ProfileCategory.DOLBY_DIRAC),
-        AcousticProfileRepository.findById("sennheiser_hd600_harman")
+        AcousticProfileRepository.findById("sennheiser_hd600_harman"),
+        isCanonical = false
     ),
     SUB_BASS_DEEP(
         "Club & Hip-Hop", "Maximum Bass",
         "Fletcher-Munson sub-bass boost curve.",
         DspConfig(activeProfileId = "creative_deep_bass", highPassCutoffHz = 85f),
         setOf(ProfileCategory.BASS),
-        DeterministicCreativeRecipes.RECIPES[0]
+        DeterministicCreativeRecipes.RECIPES[0],
+        isCanonical = false
     ),
     WARM_ANALOG_BASS(
         "Warm Low-Mids", "Smooth & Relaxed",
         "Full low-mid body with relaxed high-frequency shelving.",
         DspConfig(activeProfileId = "creative_warm_acoustic", highPassCutoffHz = 80f),
         setOf(ProfileCategory.BASS),
-        DeterministicCreativeRecipes.RECIPES[4]
+        DeterministicCreativeRecipes.RECIPES[4],
+        isCanonical = false
     ),
     DIRAC_VIRTUO_ACOUSTIC(
         "Acoustic & Classical", "Strings & Piano",
         "Natural string and acoustic instrument balance with open dynamics.",
         DspConfig(activeProfileId = "creative_warm_acoustic", highPassCutoffHz = 80f),
         setOf(ProfileCategory.INSTRUMENTAL, ProfileCategory.DOLBY_DIRAC),
-        DeterministicCreativeRecipes.RECIPES[4]
+        DeterministicCreativeRecipes.RECIPES[4],
+        isCanonical = false
     ),
     DOLBY_SYMPHONY(
         "Orchestral Air", "Open & Bright",
         "Airy treble extension with wide spatial acoustic cues.",
         DspConfig(activeProfileId = "creative_treble_air", highPassCutoffHz = 80f),
         setOf(ProfileCategory.INSTRUMENTAL, ProfileCategory.DOLBY_DIRAC),
-        DeterministicCreativeRecipes.RECIPES[3]
+        DeterministicCreativeRecipes.RECIPES[3],
+        isCanonical = false
     ),
     LIVE_INSTRUMENTAL(
         "Rock & Live", "Guitars & Drums",
         "Accurate ear-canal response with solid dynamics.",
         DspConfig(activeProfileId = "apple_airpods_pro_harman", highPassCutoffHz = 80f),
         setOf(ProfileCategory.INSTRUMENTAL),
-        AcousticProfileRepository.findById("apple_airpods_pro_harman")
+        AcousticProfileRepository.findById("apple_airpods_pro_harman"),
+        isCanonical = false
     ),
     BYPASS(
         "Bypass", "Stock Phone Sound",
         "Disables all processing for direct acoustic A/B comparison.",
         DspConfig(enabled = false, activeProfileId = null),
         emptySet(),
-        null
+        null,
+        isCanonical = false
     );
 
     fun matchesCategory(category: ProfileCategory): Boolean =
-        category == ProfileCategory.ALL || categories.contains(category)
+        (category == ProfileCategory.ALL) || categories.contains(category)
+
+    companion object {
+        /** The 15 verified, calibrated acoustic profiles backed by real measurements and deterministic DSP. */
+        val canonicalProfiles: List<TuningProfile> by lazy {
+            entries.filter { it.isCanonical }
+        }
+    }
 }
