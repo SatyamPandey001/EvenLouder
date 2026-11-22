@@ -1,10 +1,13 @@
 package com.evenlouder.app.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -18,11 +21,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -43,14 +50,15 @@ import com.evenlouder.app.ui.components.TactileSliderCard
 import com.evenlouder.app.ui.components.VolumeBoostCard
 import com.evenlouder.app.ui.components.matchesConfig
 import com.evenlouder.app.ui.theme.LocalExtendedColors
+import com.evenlouder.app.ui.theme.TactileTokens
+import com.evenlouder.app.ui.theme.tactileClickable
+import com.evenlouder.app.ui.theme.tactileCta
+import com.evenlouder.app.ui.theme.tactileInset
+import com.evenlouder.app.ui.theme.tactileRaised
 
 /**
- * Restructured dashboard. Same signature as before, so MainActivity is unchanged.
- *
- *  1. Hero: status, profile name, power button, live curve, hold-to-compare, test sound
- *  2. Profiles: horizontal carousel with plain-language description
- *  3. Fine tune: collapsed by default
- *  4. Settings sheet: theme, external-app hooking, ADB tip, active streams
+ * Modern soft tactile dashboard with subtle skeuomorphic depth,
+ * sculpted hardware controls, dual shadows, and physical press feedback.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,9 +72,10 @@ fun DashboardScreen(
     onConfigChange: (DspConfig) -> Unit,
     onTestAudioToggle: () -> Unit
 ) {
+    val extendedColors = LocalExtendedColors.current
+    val isDark = extendedColors.isDark
     val primary = MaterialTheme.colorScheme.primary
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val border = LocalExtendedColors.current.cardBorder
     val latestConfig by rememberUpdatedState(config)
 
     var showSettings by remember { mutableStateOf(false) }
@@ -102,27 +111,55 @@ fun DashboardScreen(
         ) {
             // Top bar
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    EvenLouderLoader(size = 32.dp, variant = LoaderVariant.StaticIcon, contentDescription = "EvenLouder logo")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .tactileRaised(shapeRadius = 12.dp, elevation = 2.dp, isDarkTheme = isDark),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        EvenLouderLoader(
+                            size = 28.dp,
+                            variant = LoaderVariant.StaticIcon,
+                            contentDescription = "EvenLouder logo"
+                        )
+                    }
                     Text(
                         "EvenLouder",
                         fontSize = 20.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                 }
-                IconButton(onClick = { showSettings = true }) {
-                    Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = muted)
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .tactileClickable(shapeRadius = 12.dp, isDarkTheme = isDark, elevation = 2.dp) {
+                            showSettings = true
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.Settings,
+                        contentDescription = "Settings",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
 
             Spacer(Modifier.height(20.dp))
 
-            // Hero: status + power
+            // Hero: status + tactile power button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -130,151 +167,179 @@ fun DashboardScreen(
             ) {
                 Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                     Text(
-                        if (config.enabled) "Tuning on" else "Bypassed",
-                        fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        text = if (config.enabled) "Tuning on" else "Bypassed",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
                         color = if (config.enabled) primary else muted
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        headline,
-                        fontSize = 30.sp,
-                        lineHeight = 34.sp,
-                        fontWeight = FontWeight.Bold,
+                        text = headline,
+                        fontSize = 28.sp,
+                        lineHeight = 32.sp,
+                        fontWeight = FontWeight.ExtraBold,
                         maxLines = 2,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Spacer(Modifier.height(4.dp))
-                    Text(statusLine, fontSize = 14.sp, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            Surface(
-                onClick = { onConfigChange(config.copy(enabled = !config.enabled)) },
-                shape = CircleShape,
-                color = if (config.enabled) primary else MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.size(64.dp).semantics {
-                    contentDescription = if (config.enabled) "Turn tuning off" else "Turn tuning on"
-                }
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.PowerSettingsNew, contentDescription = null,
-                        tint = if (config.enabled) MaterialTheme.colorScheme.onPrimary else muted,
-                        modifier = Modifier.size(30.dp)
+                    Text(
+                        text = statusLine,
+                        fontSize = 13.5.sp,
+                        color = muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-            }
-        }
 
-        Spacer(Modifier.height(16.dp))
-        DspCurveVisualizer(config = config, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(12.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            CompareButton(
-                available = config.enabled || comparing,
-                onHold = { holding ->
-                    comparing = holding
-                    onConfigChange(latestConfig.copy(enabled = !holding))
-                },
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedButton(
-                onClick = onTestAudioToggle,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.weight(1f).height(52.dp)
-            ) {
-                Icon(
-                    if (isTestAudioPlaying) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
-                    contentDescription = null, modifier = Modifier.size(20.dp)
+                // Physical Tactile Power Button
+                TactilePowerButton(
+                    enabled = config.enabled,
+                    isDarkTheme = isDark,
+                    onClick = { onConfigChange(config.copy(enabled = !config.enabled)) }
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(if (isTestAudioPlaying) "Stop test" else "Test sound", fontSize = 14.sp)
             }
-        }
 
-        Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(18.dp))
+            DspCurveVisualizer(config = config, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(14.dp))
 
-        // Profiles
-        Text("Profiles", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(12.dp))
-        VolumeBoostCard(config = config, onConfigChange = onConfigChange)
-        Spacer(Modifier.height(20.dp))
-        ProfileSelector(
-            currentConfig = config,
-            onSelectProfile = { profile ->
-                onConfigChange(config.applyingProfile(profile))
+            // Action Buttons: Hold to Compare & Test Sound
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                TactileCompareButton(
+                    available = config.enabled || comparing,
+                    isDarkTheme = isDark,
+                    onHold = { holding ->
+                        comparing = holding
+                        onConfigChange(latestConfig.copy(enabled = !holding))
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+
+                TactileTestSoundButton(
+                    isPlaying = isTestAudioPlaying,
+                    isDarkTheme = isDark,
+                    onClick = onTestAudioToggle,
+                    modifier = Modifier.weight(1f)
+                )
             }
-        )
 
-        Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(28.dp))
 
-        // Fine tune (collapsed by default)
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, border),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable { showFineTune = !showFineTune }.padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Fine tune", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Adjust each band yourself", fontSize = 12.sp, color = muted)
-                    }
-                    Icon(
-                        if (showFineTune) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                        contentDescription = if (showFineTune) "Collapse fine tune" else "Expand fine tune",
-                        tint = muted
-                    )
+            // Profiles Section
+            Text("Profiles", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+            VolumeBoostCard(config = config, onConfigChange = onConfigChange)
+            Spacer(Modifier.height(20.dp))
+            ProfileSelector(
+                currentConfig = config,
+                onSelectProfile = { profile ->
+                    onConfigChange(config.applyingProfile(profile))
                 }
-                AnimatedVisibility(visible = showFineTune) {
-                    Column {
-                        TactileSliderCard("Loudness", "Compressor makeup gain", config.loudnessGainDb, 0f..6f,
-                            onValueChange = { onTune(config.copy(loudnessGainDb = it)) })
-                        TactileSliderCard("Voice clarity", "Boosts 2-4 kHz", config.vocalClarityDb, -6f..10f,
-                            onValueChange = { onTune(config.copy(vocalClarityDb = it)) })
-                        TactileSliderCard("Bass punch", "Boosts ~300 Hz upper bass", config.bassGainDb, 0f..10f,
-                            onValueChange = { onTune(config.copy(bassGainDb = it)) })
-                        TactileSliderCard("Less boxy", "Cuts ~950 Hz", config.boxinessCutDb, -10f..0f,
-                            onValueChange = { onTune(config.copy(boxinessCutDb = it)) })
-                        TactileSliderCard("Treble detail", "Shelf from ~5.5 kHz up", config.trebleGainDb, -6f..10f,
-                            onValueChange = { onTune(config.copy(trebleGainDb = it)) })
+            )
 
-                        Spacer(Modifier.height(8.dp))
-                        Text("Speaker size", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Cuts deep lows the speaker cannot reproduce", fontSize = 12.sp, color = muted)
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(120f to "Large", 140f to "Standard", 160f to "Compact").forEach { (hz, label) ->
-                                FilterChip(
-                                    selected = kotlin.math.abs(config.highPassCutoffHz - hz) < 0.5f,
-                                    onClick = { onTune(config.copy(highPassCutoffHz = hz)) },
-                                    label = { Text("$label · ${hz.toInt()} Hz", fontSize = 12.sp) }
-                                )
+            Spacer(Modifier.height(24.dp))
+
+            // Fine tune (collapsed by default)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tactileRaised(shapeRadius = 22.dp, elevation = 5.dp, isDarkTheme = isDark)
+                    .padding(horizontal = 18.dp, vertical = 10.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showFineTune = !showFineTune }
+                            .padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Fine tune", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Adjust each band yourself", fontSize = 12.sp, color = muted)
+                        }
+                        Icon(
+                            imageVector = if (showFineTune) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = if (showFineTune) "Collapse fine tune" else "Expand fine tune",
+                            tint = muted
+                        )
+                    }
+
+                    AnimatedVisibility(visible = showFineTune) {
+                        Column(modifier = Modifier.padding(top = 4.dp)) {
+                            TactileSliderCard("Loudness", "Compressor makeup gain", config.loudnessGainDb, 0f..6f,
+                                onValueChange = { onTune(config.copy(loudnessGainDb = it)) })
+                            TactileSliderCard("Voice clarity", "Boosts 2-4 kHz", config.vocalClarityDb, -6f..10f,
+                                onValueChange = { onTune(config.copy(vocalClarityDb = it)) })
+                            TactileSliderCard("Bass punch", "Boosts ~300 Hz upper bass", config.bassGainDb, 0f..10f,
+                                onValueChange = { onTune(config.copy(bassGainDb = it)) })
+                            TactileSliderCard("Less boxy", "Cuts ~950 Hz", config.boxinessCutDb, -10f..0f,
+                                onValueChange = { onTune(config.copy(boxinessCutDb = it)) })
+                            TactileSliderCard("Treble detail", "Shelf from ~5.5 kHz up", config.trebleGainDb, -6f..10f,
+                                onValueChange = { onTune(config.copy(trebleGainDb = it)) })
+
+                            Spacer(Modifier.height(10.dp))
+                            Text("Speaker size", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Cuts deep lows the speaker cannot reproduce", fontSize = 12.sp, color = muted)
+                            Spacer(Modifier.height(10.dp))
+
+                            // Tactile Speaker Size Rocker Pills
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .tactileInset(shapeRadius = 12.dp, isDarkTheme = isDark, depth = 2.dp)
+                                    .padding(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                listOf(120f to "Large", 140f to "Standard", 160f to "Compact").forEach { (hz, label) ->
+                                    val isSelected = kotlin.math.abs(config.highPassCutoffHz - hz) < 0.5f
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(9.dp))
+                                            .then(
+                                                if (isSelected) {
+                                                    Modifier.tactileRaised(shapeRadius = 9.dp, elevation = 2.dp, isDarkTheme = isDark)
+                                                } else Modifier
+                                            )
+                                            .clickable { onTune(config.copy(highPassCutoffHz = hz)) }
+                                            .padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "$label · ${hz.toInt()} Hz",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) primary else muted
+                                        )
+                                    }
+                                }
+                            }
+
+                            TextButton(
+                                onClick = {
+                                    onConfigChange(config.applyingProfile(TuningProfile.STUDIO_REFERENCE))
+                                },
+                                modifier = Modifier.padding(top = 8.dp)
+                            ) {
+                                Text("Reset to Balanced", fontWeight = FontWeight.SemiBold)
                             }
                         }
-                        TextButton(
-                            onClick = {
-                                onConfigChange(config.applyingProfile(TuningProfile.STUDIO_REFERENCE))
-                            },
-                            modifier = Modifier.padding(top = 4.dp)
-                        ) { Text("Reset to Balanced") }
                     }
                 }
             }
-        }
 
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "Profiles are equalizer and compressor presets, not measurements of your phone. Trust your ears.",
-            fontSize = 12.sp, lineHeight = 16.sp, color = muted
-        )
-        Spacer(Modifier.height(32.dp))
-        Spacer(Modifier.navigationBarsPadding())
-    }
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Profiles are equalizer and compressor presets, not measurements of your phone. Trust your ears.",
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                color = muted
+            )
+            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.navigationBarsPadding())
+        }
     }
 
     if (showSettings) {
@@ -290,20 +355,111 @@ fun DashboardScreen(
     }
 }
 
-/** Press and hold to hear the original sound; release to return to the tuned sound. */
+/**
+ * Tactile circular power button with rich glossy gradient CTA when active,
+ * soft extruded tactile neutral when bypassed, and smooth physical press feedback.
+ */
 @Composable
-private fun CompareButton(available: Boolean, onHold: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+private fun TactilePowerButton(
+    enabled: Boolean,
+    isDarkTheme: Boolean,
+    onClick: () -> Unit
+) {
+    val extendedColors = LocalExtendedColors.current
+    val primary = MaterialTheme.colorScheme.primary
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1.0f,
+        animationSpec = tween(durationMillis = 100),
+        label = "powerBtnScale"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(64.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .then(
+                if (enabled) {
+                    Modifier.tactileCta(
+                        gradient = extendedColors.primaryCtaGradient,
+                        glowColor = primary,
+                        shapeRadius = 32.dp,
+                        elevation = 6.dp,
+                        isPressed = isPressed
+                    )
+                } else {
+                    Modifier.tactileRaised(
+                        shapeRadius = 32.dp,
+                        elevation = 4.dp,
+                        isDarkTheme = isDarkTheme,
+                        pressed = isPressed
+                    )
+                }
+            )
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .semantics {
+                contentDescription = if (enabled) "Turn tuning off" else "Turn tuning on"
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.PowerSettingsNew,
+            contentDescription = null,
+            tint = if (enabled) MaterialTheme.colorScheme.onPrimary else muted,
+            modifier = Modifier.size(30.dp)
+        )
+    }
+}
+
+/**
+ * Press and hold to hear the original sound; release to return to the tuned sound.
+ * Physically depresses into a recessed inset state when held.
+ */
+@Composable
+private fun TactileCompareButton(
+    available: Boolean,
+    isDarkTheme: Boolean,
+    onHold: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
     var held by remember { mutableStateOf(false) }
     val availableNow by rememberUpdatedState(available)
     val onHoldNow by rememberUpdatedState(onHold)
+    val primary = MaterialTheme.colorScheme.primary
 
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = if (held) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (held) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+    val scale by animateFloatAsState(
+        targetValue = if (held) 0.97f else 1.0f,
+        animationSpec = tween(durationMillis = 80),
+        label = "compareScale"
+    )
+
+    Box(
         modifier = modifier
             .height(52.dp)
             .alpha(if (available) 1f else 0.4f)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .then(
+                if (held) {
+                    Modifier.tactileInset(shapeRadius = 16.dp, isDarkTheme = isDarkTheme, depth = 3.dp)
+                } else {
+                    Modifier.tactileRaised(shapeRadius = 16.dp, elevation = 3.dp, isDarkTheme = isDarkTheme)
+                }
+            )
+            .clip(RoundedCornerShape(16.dp))
             .semantics { contentDescription = "Hold to hear the original, unprocessed sound" }
             .pointerInput(Unit) {
                 detectTapGestures(onPress = {
@@ -318,16 +474,70 @@ private fun CompareButton(available: Boolean, onHold: (Boolean) -> Unit, modifie
                         }
                     }
                 })
-            }
+            },
+        contentAlignment = Alignment.Center
     ) {
         Row(
-            modifier = Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.AutoMirrored.Rounded.CompareArrows, contentDescription = null, modifier = Modifier.size(20.dp))
+            Icon(
+                Icons.AutoMirrored.Rounded.CompareArrows,
+                contentDescription = null,
+                tint = if (held) primary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(20.dp)
+            )
             Spacer(Modifier.width(6.dp))
-            Text(if (held) "Original" else "Hold to compare", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                text = if (held) "Original" else "Hold to compare",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (held) primary else MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+/**
+ * Tactile button for toggling acoustic test playback.
+ */
+@Composable
+private fun TactileTestSoundButton(
+    isPlaying: Boolean,
+    isDarkTheme: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val secondary = MaterialTheme.colorScheme.secondary
+
+    Box(
+        modifier = modifier
+            .height(52.dp)
+            .tactileClickable(
+                shapeRadius = 16.dp,
+                isDarkTheme = isDarkTheme,
+                elevation = 3.dp,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                contentDescription = null,
+                tint = if (isPlaying) secondary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = if (isPlaying) "Stop test" else "Test sound",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isPlaying) secondary else MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }
@@ -344,7 +554,6 @@ private fun SettingsSheet(
     onDismiss: () -> Unit
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val border = LocalExtendedColors.current.cardBorder
     val green = LocalExtendedColors.current.signalGreen
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
@@ -352,7 +561,8 @@ private fun SettingsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.background
     ) {
         Column(
             modifier = Modifier
@@ -362,11 +572,11 @@ private fun SettingsSheet(
                 .padding(bottom = 24.dp)
                 .navigationBarsPadding()
         ) {
-            Text("Settings", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(12.dp))
+            Text("Settings", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(14.dp))
 
             SettingRow("Dark theme", "Switch between dark and light", isDarkTheme) { onToggleTheme() }
-            Divider1(border)
+            Divider1(isDarkTheme)
             SettingRow(
                 "Tune other apps",
                 if (isDumpPermissionGranted) "Enhanced detection is on: browsers, video and music apps."
@@ -376,9 +586,9 @@ private fun SettingsSheet(
 
             if (config.globalHookEnabled && !isDumpPermissionGranted) {
                 val context = LocalContext.current
-                var isShizukuAvailable by remember { mutableStateOf(ShizukuHelper.isShizukuAvailable()) }
+                val isShizukuAvailable by remember { mutableStateOf(ShizukuHelper.isShizukuAvailable()) }
                 var hasShizukuPerm by remember { mutableStateOf(ShizukuHelper.hasShizukuPermission()) }
-                var isNotifListenerGranted by remember { mutableStateOf(EvenLouderMediaNotificationListener.isGranted(context)) }
+                val isNotifListenerGranted by remember { mutableStateOf(EvenLouderMediaNotificationListener.isGranted(context)) }
 
                 LaunchedEffect(Unit) {
                     ShizukuHelper.registerPermissionListener {
@@ -388,14 +598,14 @@ private fun SettingsSheet(
                 }
 
                 Spacer(Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    border = BorderStroke(1.dp, border),
-                    modifier = Modifier.fillMaxWidth()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .tactileRaised(shapeRadius = 16.dp, elevation = 3.dp, isDarkTheme = isDarkTheme)
+                        .padding(16.dp)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("Want browsers & video apps too?", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Column {
+                        Text("Want browsers & video apps too?", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         Text(
                             "Grant permission directly on your phone without a PC using any of these methods:",
                             fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
@@ -409,19 +619,25 @@ private fun SettingsSheet(
                             fontSize = 11.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
                         )
                         if (isShizukuAvailable) {
-                            Button(
-                                onClick = {
-                                    if (hasShizukuPerm) {
-                                        ShizukuHelper.grantDumpPermissionViaShizuku(context)
-                                    } else {
-                                        ShizukuHelper.requestShizukuPermission()
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth().height(36.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(38.dp)
+                                    .tactileClickable(shapeRadius = 10.dp, isDarkTheme = isDarkTheme, elevation = 2.dp) {
+                                        if (hasShizukuPerm) {
+                                            ShizukuHelper.grantDumpPermissionViaShizuku(context)
+                                        } else {
+                                            ShizukuHelper.requestShizukuPermission()
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text(if (hasShizukuPerm) "Grant Permission Now" else "Authorize via Shizuku", fontSize = 12.sp)
+                                Text(
+                                    if (hasShizukuPerm) "Grant Permission Now" else "Authorize via Shizuku",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             }
                             Spacer(Modifier.height(10.dp))
                         }
@@ -436,22 +652,18 @@ private fun SettingsSheet(
                         val shellCommand = "pm grant com.evenlouder.app android.permission.DUMP"
                         var copiedShell by remember { mutableStateOf(false) }
 
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, border),
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .tactileInset(shapeRadius = 10.dp, isDarkTheme = isDarkTheme, depth = 2.dp)
                                 .clickable {
                                     clipboard.setText(AnnotatedString(shellCommand))
                                     copiedShell = true
                                     copied = false
                                 }
+                                .padding(horizontal = 12.dp, vertical = 9.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("For LADB / Termux / Device Shell:", fontSize = 10.sp, color = muted)
                                     Text(
@@ -468,24 +680,20 @@ private fun SettingsSheet(
                             }
                         }
 
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(8.dp))
 
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, border),
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .tactileInset(shapeRadius = 10.dp, isDarkTheme = isDarkTheme, depth = 2.dp)
                                 .clickable {
                                     clipboard.setText(AnnotatedString(adbCommand))
                                     copied = true
                                     copiedShell = false
                                 }
+                                .padding(horizontal = 12.dp, vertical = 9.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("For PC ADB Terminal:", fontSize = 10.sp, color = muted)
                                     Text(
@@ -509,15 +717,19 @@ private fun SettingsSheet(
                             "Grant Notification Listener access in Android settings to detect active playback.",
                             fontSize = 11.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
                         )
-                        OutlinedButton(
-                            onClick = { EvenLouderMediaNotificationListener.openSettings(context) },
-                            modifier = Modifier.fillMaxWidth().height(36.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(38.dp)
+                                .tactileClickable(shapeRadius = 10.dp, isDarkTheme = isDarkTheme, elevation = 2.dp) {
+                                    EvenLouderMediaNotificationListener.openSettings(context)
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 if (isNotifListenerGranted) "Notification Access Granted ✓" else "Open System Settings",
                                 fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
                                 color = if (isNotifListenerGranted) green else MaterialTheme.colorScheme.primary
                             )
                         }
@@ -533,19 +745,28 @@ private fun SettingsSheet(
                 }
             }
 
-            Divider1(border)
-            Text("Active streams", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(6.dp))
+            Divider1(isDarkTheme)
+            Text("Active streams", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
             if (activeSessions.isEmpty()) {
                 Text("None right now. Play audio in any app, or use Test sound.", fontSize = 13.sp, color = muted)
             } else {
                 activeSessions.forEach { (id, client) ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                            .tactileInset(shapeRadius = 8.dp, isDarkTheme = isDarkTheme, depth = 1.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        Text(client, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        Text("#$id", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = muted)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(client, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text("#$id", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = muted)
+                        }
                     }
                 }
             }
@@ -569,8 +790,13 @@ private fun SettingRow(title: String, subtitle: String, checked: Boolean, onChec
 }
 
 @Composable
-private fun Divider1(color: Color) {
+private fun Divider1(isDarkTheme: Boolean) {
     Spacer(Modifier.height(8.dp))
-    Box(Modifier.fillMaxWidth().height(1.dp).background(color))
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(if (isDarkTheme) Color(0x22FFFFFF) else Color(0x1F718096))
+    )
     Spacer(Modifier.height(8.dp))
 }

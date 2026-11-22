@@ -5,7 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -26,6 +26,8 @@ import com.evenlouder.app.core.dsp.DspConfig
 import com.evenlouder.app.core.dsp.EqLayout
 import com.evenlouder.app.core.dsp.EqPoint
 import com.evenlouder.app.ui.theme.LocalExtendedColors
+import com.evenlouder.app.ui.theme.tactileInset
+import com.evenlouder.app.ui.theme.tactileRaised
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
@@ -40,10 +42,8 @@ private const val MAX_DB = 12f
 /**
  * EQ band response viewer.
  *
- * Unlike the previous version, this does NOT use invented bell curves. It reads the exact
- * band table the audio engine applies ([EqLayout.build]) and draws it, interpolating
- * smoothly between band centres on a log-frequency axis. Compression and the limiter are
- * level-dependent, so they are not part of this graph.
+ * Sculpted as a tactile hardware meter module with extruded physical bezel,
+ * recessed display screen, and high-precision frequency response tracing.
  */
 @Composable
 fun DspCurveVisualizer(
@@ -53,8 +53,8 @@ fun DspCurveVisualizer(
     val extendedColors = LocalExtendedColors.current
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
-    val surfaceColor = MaterialTheme.colorScheme.surface
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    val isDark = extendedColors.isDark
 
     // Animate the real parameters, then rebuild the real band table from them
     val animHpf by animateFloatAsState(config.highPassCutoffHz, tween(250), label = "hpf")
@@ -76,10 +76,10 @@ fun DspCurveVisualizer(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(surfaceColor)
-            .padding(14.dp)
+            .tactileRaised(shapeRadius = 20.dp, elevation = 5.dp, isDarkTheme = isDark)
+            .padding(16.dp)
     ) {
+        // Physical Meter Bezel Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -87,39 +87,55 @@ fun DspCurveVisualizer(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Tactile physical status LED with glow rim
                 Box(
                     modifier = Modifier
-                        .size(8.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(if (config.enabled) extendedColors.signalGreen else Color(0xFFFF5252))
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(
+                            brush = Brush.radialGradient(
+                                colors = if (config.enabled) {
+                                    listOf(extendedColors.signalGreen, extendedColors.signalGreen.copy(alpha = 0.5f))
+                                } else {
+                                    listOf(Color(0xFFFF5252), Color(0x80FF5252))
+                                }
+                            )
+                        )
                 )
                 Text(
-                    text = if (config.enabled) "EQ BAND RESPONSE" else "BYPASS (FLAT)",
-                    fontSize = 11.sp,
+                    text = if (config.enabled) "ACOUSTIC BAND RESPONSE" else "BYPASS (FLAT RESPONSE)",
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.5.sp,
                     color = if (config.enabled) primaryColor else Color(0xFFFF5252)
                 )
             }
             Text(
-                text = if (config.enabled) "LIMITER: ${"%.1f".format(config.limiterCeilingDb)} dBFS" else "LIMITER: OFF",
-                fontSize = 10.sp,
+                text = if (config.enabled) "CEILING: ${"%.1f".format(config.limiterCeilingDb)} dBFS" else "LIMITER: OFF",
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
                 color = if (config.enabled) secondaryColor else onSurfaceVariant
             )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
+        // Recessed Hardware Display Screen (Inset Shadow Frame)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(130.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
+                .height(132.dp)
+                .tactileInset(
+                    shapeRadius = 12.dp,
+                    isDarkTheme = isDark,
+                    depth = 3.dp,
+                    backgroundColor = if (isDark) Color(0xFF13161C) else Color(0xFFE2E7ED)
+                )
+                .padding(2.dp)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val width = size.width
@@ -135,13 +151,14 @@ fun DspCurveVisualizer(
                     return ((MAX_DB - clamped) / (MAX_DB - MIN_DB)) * height
                 }
 
-                // Grid
-                val gridColor = Color.White.copy(alpha = 0.06f)
+                // Tactile Grid lines
+                val gridColor = if (isDark) Color.White.copy(alpha = 0.05f) else Color(0xFF718096).copy(alpha = 0.12f)
                 listOf(6f, -12f, -24f).forEach { db ->
                     drawLine(gridColor, Offset(0f, dbToY(db)), Offset(width, dbToY(db)), strokeWidth = 1f)
                 }
+                // Zero dB center baseline
                 drawLine(
-                    Color.White.copy(alpha = 0.12f),
+                    if (isDark) Color.White.copy(alpha = 0.14f) else Color(0xFF4A5568).copy(alpha = 0.22f),
                     Offset(0f, dbToY(0f)), Offset(width, dbToY(0f)),
                     strokeWidth = 1.5f
                 )
@@ -149,7 +166,7 @@ fun DspCurveVisualizer(
                     drawLine(gridColor, Offset(freqToX(f), 0f), Offset(freqToX(f), height), strokeWidth = 1f)
                 }
 
-                // Curve
+                // Smooth Interpolated Response Curve
                 val curvePath = Path()
                 val fillPath = Path()
                 val steps = 120
@@ -171,46 +188,65 @@ fun DspCurveVisualizer(
                 fillPath.lineTo(width, height)
                 fillPath.close()
 
+                // Soft glow gradient underneath curve
                 drawPath(
                     fillPath,
                     brush = Brush.verticalGradient(
                         colors = if (config.enabled) {
-                            listOf(primaryColor.copy(alpha = 0.28f), primaryColor.copy(alpha = 0.02f))
+                            listOf(primaryColor.copy(alpha = 0.32f), primaryColor.copy(alpha = 0.02f))
                         } else {
-                            listOf(Color.Gray.copy(alpha = 0.15f), Color.Transparent)
+                            listOf(Color.Gray.copy(alpha = 0.12f), Color.Transparent)
                         },
                         startY = 0f,
                         endY = height
                     )
                 )
+
+                // High-precision curve stroke
                 drawPath(
                     curvePath,
                     color = if (config.enabled) primaryColor else Color.Gray,
-                    style = Stroke(width = 3.5f, cap = StrokeCap.Round)
+                    style = Stroke(width = 3.2f, cap = StrokeCap.Round)
                 )
 
-                // Markers at the four tuned regions (values read from the real table)
+                // Tactile Hardware Markers (Glow Dial Nodes)
                 if (config.enabled) {
                     listOf(280.0, 950.0, 2800.0, 7500.0).forEach { f ->
+                        val cx = freqToX(f)
+                        val cy = dbToY(responseDb(f, bands))
+                        // Outer rim
+                        drawCircle(
+                            color = secondaryColor.copy(alpha = 0.35f),
+                            radius = 6.5f,
+                            center = Offset(cx, cy)
+                        )
+                        // Core dial
                         drawCircle(
                             color = secondaryColor,
-                            radius = 4.5f,
-                            center = Offset(freqToX(f), dbToY(responseDb(f, bands)))
+                            radius = 4.0f,
+                            center = Offset(cx, cy)
                         )
                     }
+                    val hpfX = freqToX(animHpf.toDouble())
+                    val hpfY = dbToY(responseDb(animHpf.toDouble(), bands))
+                    drawCircle(
+                        color = primaryColor.copy(alpha = 0.35f),
+                        radius = 6.0f,
+                        center = Offset(hpfX, hpfY)
+                    )
                     drawCircle(
                         color = primaryColor,
-                        radius = 4f,
-                        center = Offset(freqToX(animHpf.toDouble()), dbToY(responseDb(animHpf.toDouble(), bands)))
+                        radius = 3.5f,
+                        center = Offset(hpfX, hpfY)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Labels positioned at their true log-frequency positions
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(14.dp)) {
+        // Logarithmic Scale Markers
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(16.dp)) {
             val logSpan = ln(MAX_FREQ) - ln(MIN_FREQ)
             listOf(
                 100.0 to "100",
@@ -223,6 +259,7 @@ fun DspCurveVisualizer(
                     text = "$label Hz",
                     fontSize = 10.sp,
                     color = onSurfaceVariant,
+                    fontWeight = FontWeight.Medium,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.offset(x = maxWidth * frac - 18.dp)
                 )

@@ -1,9 +1,9 @@
 package com.evenlouder.app.ui.components
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
@@ -20,11 +21,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -34,6 +37,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,6 +48,9 @@ import com.evenlouder.app.core.dsp.ProfileCategory
 import com.evenlouder.app.core.dsp.TuningCategory
 import com.evenlouder.app.core.dsp.TuningProfile
 import com.evenlouder.app.ui.theme.LocalExtendedColors
+import com.evenlouder.app.ui.theme.tactileClickable
+import com.evenlouder.app.ui.theme.tactileInset
+import com.evenlouder.app.ui.theme.tactileRaised
 
 /**
  * Display layout mode for selecting profiles.
@@ -108,7 +115,7 @@ private fun iconFor(profile: TuningProfile): ImageVector = when (profile) {
 }
 
 /**
- * Modern profile selector with tactile category pills, multi-view layout switching (Carousel, Grid, List),
+ * Modern soft tactile profile selector with sculpted category pills, multi-view layout switching,
  * real-time acoustic frequency sparklines, and verified calibration provenance.
  */
 @Composable
@@ -124,7 +131,6 @@ fun ProfileSelector(
 
     val canonicalProfiles = remember { TuningProfile.canonicalProfiles }
 
-    // Precalculate counts for each category using only verified, calibrated profiles
     val categoryCounts = remember(canonicalProfiles) {
         ProfileCategory.entries.associateWith { cat ->
             canonicalProfiles.count { it.matchesCategory(cat) }
@@ -150,8 +156,10 @@ fun ProfileSelector(
     val active = visible.firstOrNull { it.matchesConfig(currentConfig) }
         ?: canonicalProfiles.firstOrNull { it.matchesConfig(currentConfig) }
 
+    val extendedColors = LocalExtendedColors.current
+    val isDark = extendedColors.isDark
     val primary = MaterialTheme.colorScheme.primary
-    val border = LocalExtendedColors.current.cardBorder
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val listState = rememberLazyListState()
 
     LaunchedEffect(active, selectedCategory) {
@@ -162,50 +170,61 @@ fun ProfileSelector(
     }
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // Modern Search Input Field
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = {
-                Text(
-                    text = "Search headphone model, target, profile...",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-            },
-            leadingIcon = {
+        // Recessed Tactile Search Input Field
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .tactileInset(shapeRadius = 14.dp, isDarkTheme = isDark, depth = 2.5.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Icon(
                     Icons.Rounded.Search,
                     contentDescription = "Search",
                     tint = primary,
                     modifier = Modifier.size(20.dp)
                 )
-            },
-            trailingIcon = if (searchQuery.isNotEmpty()) {
-                {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(
-                            Icons.Rounded.Clear,
-                            contentDescription = "Clear search",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+
+                Box(modifier = Modifier.weight(1f)) {
+                    if (searchQuery.isEmpty()) {
+                        Text(
+                            text = "Search headphone model, target, profile...",
+                            fontSize = 13.sp,
+                            color = muted.copy(alpha = 0.7f)
                         )
                     }
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        cursorBrush = SolidColor(primary),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
-            } else null,
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedBorderColor = primary,
-                unfocusedBorderColor = border,
-                cursorColor = primary
-            )
-        )
 
-        // Refined Category Pills with Icons & Count Badges
+                if (searchQuery.isNotEmpty()) {
+                    Icon(
+                        Icons.Rounded.Clear,
+                        contentDescription = "Clear search",
+                        tint = muted,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { searchQuery = "" }
+                    )
+                }
+            }
+        }
+
+        // Soft Tactile Category Pills with Count Badges
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -214,20 +233,21 @@ fun ProfileSelector(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ProfileCategory.entries.forEach { category ->
-                val on = selectedCategory == category
+                val isSelected = selectedCategory == category
                 val count = categoryCounts[category] ?: 0
 
-                CategoryPill(
+                TactileCategoryPill(
                     label = categoryShortLabel(category),
                     icon = iconForCategory(category),
                     count = count,
-                    isSelected = on,
+                    isSelected = isSelected,
+                    isDarkTheme = isDark,
                     onClick = { selectedCategory = category }
                 )
             }
         }
 
-        // Section Subheader: Category Title & Count + View Mode Switcher
+        // Section Subheader: Category Title & Count + Tactile View Mode Rocker
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -240,79 +260,77 @@ fun ProfileSelector(
                 Text(
                     text = selectedCategory.label,
                     fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, border)
+                Box(
+                    modifier = Modifier
+                        .tactileInset(shapeRadius = 6.dp, isDarkTheme = isDark, depth = 1.5.dp)
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = "${visible.size} ${if (visible.size == 1) "profile" else "profiles"}",
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        fontWeight = FontWeight.SemiBold,
+                        color = muted
                     )
                 }
             }
 
-            // View Mode Selector (Carousel, Grid, List)
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                border = BorderStroke(1.dp, border)
+            // Tactile View Mode Rocker Switch
+            Row(
+                modifier = Modifier
+                    .tactileInset(shapeRadius = 10.dp, isDarkTheme = isDark, depth = 2.dp)
+                    .padding(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    ViewModeIconButton(
-                        icon = Icons.Rounded.ViewCarousel,
-                        contentDescription = "Carousel View",
-                        isSelected = viewMode == ProfileViewMode.CAROUSEL,
-                        onClick = { viewMode = ProfileViewMode.CAROUSEL }
-                    )
-                    ViewModeIconButton(
-                        icon = Icons.Rounded.GridView,
-                        contentDescription = "Grid View",
-                        isSelected = viewMode == ProfileViewMode.GRID,
-                        onClick = { viewMode = ProfileViewMode.GRID }
-                    )
-                    ViewModeIconButton(
-                        icon = Icons.AutoMirrored.Rounded.ViewList,
-                        contentDescription = "List View",
-                        isSelected = viewMode == ProfileViewMode.LIST,
-                        onClick = { viewMode = ProfileViewMode.LIST }
-                    )
-                }
+                TactileViewModeButton(
+                    icon = Icons.Rounded.ViewCarousel,
+                    contentDescription = "Carousel View",
+                    isSelected = viewMode == ProfileViewMode.CAROUSEL,
+                    isDarkTheme = isDark,
+                    onClick = { viewMode = ProfileViewMode.CAROUSEL }
+                )
+                TactileViewModeButton(
+                    icon = Icons.Rounded.GridView,
+                    contentDescription = "Grid View",
+                    isSelected = viewMode == ProfileViewMode.GRID,
+                    isDarkTheme = isDark,
+                    onClick = { viewMode = ProfileViewMode.GRID }
+                )
+                TactileViewModeButton(
+                    icon = Icons.AutoMirrored.Rounded.ViewList,
+                    contentDescription = "List View",
+                    isSelected = viewMode == ProfileViewMode.LIST,
+                    isDarkTheme = isDark,
+                    onClick = { viewMode = ProfileViewMode.LIST }
+                )
             }
         }
 
         // Profiles Presentation based on chosen view mode
         if (visible.isEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                border = BorderStroke(1.dp, border),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tactileInset(shapeRadius = 14.dp, isDarkTheme = isDark, depth = 2.dp)
+                    .padding(16.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(
                         Icons.Rounded.SearchOff,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = muted,
                         modifier = Modifier.size(20.dp)
                     )
                     Text(
                         text = "No acoustic profiles match \"$searchQuery\" in ${selectedCategory.label}.",
                         fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = muted
                     )
                 }
             }
@@ -325,34 +343,36 @@ fun ProfileSelector(
                     ProfileViewMode.CAROUSEL -> {
                         LazyRow(
                             state = listState,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(horizontal = 2.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp)
                         ) {
                             items(visible, key = { it.name }) { profile ->
                                 ProfileCard(
                                     profile = profile,
                                     isSelected = profile == active,
+                                    isDarkTheme = isDark,
                                     onClick = { onSelectProfile(profile) },
-                                    modifier = Modifier.width(180.dp)
+                                    modifier = Modifier.width(184.dp)
                                 )
                             }
                         }
                     }
                     ProfileViewMode.GRID -> {
                         Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             visible.chunked(2).forEach { pair ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     pair.forEach { profile ->
                                         Box(modifier = Modifier.weight(1f)) {
                                             ProfileCard(
                                                 profile = profile,
                                                 isSelected = profile == active,
+                                                isDarkTheme = isDark,
                                                 onClick = { onSelectProfile(profile) },
                                                 modifier = Modifier.fillMaxWidth()
                                             )
@@ -367,13 +387,14 @@ fun ProfileSelector(
                     }
                     ProfileViewMode.LIST -> {
                         Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             visible.forEach { profile ->
                                 ProfileListItem(
                                     profile = profile,
                                     isSelected = profile == active,
+                                    isDarkTheme = isDark,
                                     onClick = { onSelectProfile(profile) }
                                 )
                             }
@@ -392,18 +413,14 @@ fun ProfileSelector(
                 } else null
             }
 
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                border = BorderStroke(1.dp, border),
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .tactileRaised(shapeRadius = 18.dp, elevation = 4.dp, isDarkTheme = isDark)
+                    .padding(16.dp)
                     .semantics(mergeDescendants = true) {}
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -427,17 +444,16 @@ fun ProfileSelector(
                             )
                         }
                         if (ac != null) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                border = BorderStroke(1.dp, border)
+                            Box(
+                                modifier = Modifier
+                                    .tactileInset(shapeRadius = 6.dp, isDarkTheme = isDark, depth = 1.5.dp)
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Text(
                                     text = "${ac.filters.size} Biquads · ${ac.license}",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    color = muted
                                 )
                             }
                         }
@@ -459,13 +475,13 @@ fun ProfileSelector(
                             Icon(
                                 Icons.Rounded.GraphicEq,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = muted,
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = "Target: ${ac.targetCurve}${if (ac.measurementRig.isNotBlank()) " · Rig: ${ac.measurementRig}" else ""}",
                                 fontSize = 11.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = muted
                             )
                         }
                     }
@@ -493,28 +509,27 @@ fun ProfileSelector(
                 }
             }
         } ?: run {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                border = BorderStroke(1.dp, border),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tactileInset(shapeRadius = 14.dp, isDarkTheme = isDark, depth = 2.dp)
+                    .padding(14.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(
                         Icons.Rounded.Tune,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = muted,
                         modifier = Modifier.size(20.dp)
                     )
                     Text(
                         text = "Custom tuning active. Tap any profile card to apply verified equalization.",
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = muted
                     )
                 }
             }
@@ -523,69 +538,67 @@ fun ProfileSelector(
 }
 
 /**
- * Modern tactile category pill with icon, label, and profile count badge.
+ * Modern soft tactile category pill with icon, label, and profile count badge.
  */
 @Composable
-private fun CategoryPill(
+private fun TactileCategoryPill(
     label: String,
     icon: ImageVector,
     count: Int,
     isSelected: Boolean,
+    isDarkTheme: Boolean,
     onClick: () -> Unit
 ) {
     val primary = MaterialTheme.colorScheme.primary
-    val border = LocalExtendedColors.current.cardBorder
 
-    val animatedBg by animateColorAsState(
-        targetValue = if (isSelected) primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        label = "pillBg"
-    )
-    val animatedBorder by animateColorAsState(
-        targetValue = if (isSelected) primary else border,
-        label = "pillBorder"
-    )
-
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = animatedBg,
-        border = BorderStroke(
-            width = if (isSelected) 1.5.dp else 1.dp,
-            color = animatedBorder
-        ),
-        modifier = Modifier.semantics {
-            role = Role.Tab
-            selected = isSelected
-        }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .then(
+                if (isSelected) {
+                    Modifier.tactileRaised(shapeRadius = 12.dp, elevation = 3.dp, isDarkTheme = isDarkTheme)
+                } else {
+                    Modifier.tactileInset(shapeRadius = 12.dp, isDarkTheme = isDarkTheme, depth = 1.5.dp)
+                }
+            )
+            .clickable(onClick = onClick)
+            .semantics {
+                role = Role.Tab
+                selected = isSelected
+            }
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else primary,
+                tint = if (isSelected) primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp)
             )
             Text(
                 text = label,
                 fontSize = 12.5.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                color = if (isSelected) primary else MaterialTheme.colorScheme.onSurface
             )
-            Surface(
-                shape = CircleShape,
-                color = if (isSelected) Color.Black.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surface,
-                modifier = Modifier.padding(start = 2.dp)
+            Box(
+                modifier = Modifier
+                    .size(18.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isSelected) primary.copy(alpha = 0.18f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = count.toString(),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    color = if (isSelected) primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -593,61 +606,64 @@ private fun CategoryPill(
 }
 
 /**
- * Icon button for switching profile layout views.
+ * Tactile icon button for switching profile layout views.
  */
 @Composable
-private fun ViewModeIconButton(
+private fun TactileViewModeButton(
     icon: ImageVector,
     contentDescription: String,
     isSelected: Boolean,
+    isDarkTheme: Boolean,
     onClick: () -> Unit
 ) {
     val primary = MaterialTheme.colorScheme.primary
 
-    IconButton(
-        onClick = onClick,
+    Box(
         modifier = Modifier
             .size(32.dp)
-            .background(
-                color = if (isSelected) primary else Color.Transparent,
-                shape = RoundedCornerShape(8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .then(
+                if (isSelected) {
+                    Modifier.tactileRaised(shapeRadius = 8.dp, elevation = 2.dp, isDarkTheme = isDarkTheme)
+                } else Modifier
             )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp)
+            tint = if (isSelected) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(17.dp)
         )
     }
 }
 
 /**
- * Rich profile card featuring tone characteristics, acoustic curve sparkline, and verification badge.
+ * Rich profile card featuring extruded tactile container, recessed socket, and acoustic curve sparkline.
  */
 @Composable
 private fun ProfileCard(
     profile: TuningProfile,
     isSelected: Boolean,
+    isDarkTheme: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val accent = MaterialTheme.colorScheme.primary
-    val border = LocalExtendedColors.current.cardBorder
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val ac = profile.acousticProfile
 
-    OutlinedCard(
-        onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.outlinedCardColors(
-            containerColor = if (isSelected) accent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(
-            width = if (isSelected) 2.dp else 1.dp,
-            color = if (isSelected) accent else border
-        ),
+    Box(
         modifier = modifier
-            .heightIn(min = 148.dp)
+            .heightIn(min = 152.dp)
+            .tactileClickable(
+                shapeRadius = 18.dp,
+                isDarkTheme = isDarkTheme,
+                elevation = if (isSelected) 5.dp else 3.dp,
+                onClick = onClick
+            )
+            .padding(12.dp)
             .semantics {
                 role = Role.RadioButton
                 selected = isSelected
@@ -655,13 +671,11 @@ private fun ProfileCard(
             }
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
+            modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Top Row: Icon + Badge
+                // Top Row: Recessed Icon Socket + Badge
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -671,35 +685,33 @@ private fun ProfileCard(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .size(34.dp)
-                            .background(
-                                color = if (isSelected) accent.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(10.dp)
-                            )
+                            .tactileInset(shapeRadius = 10.dp, isDarkTheme = isDarkTheme, depth = 2.dp)
                     ) {
                         Icon(
                             iconFor(profile),
                             contentDescription = null,
-                            tint = if (isSelected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (isSelected) accent else muted,
                             modifier = Modifier.size(18.dp)
                         )
                     }
 
                     if (isSelected) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = accent,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(accent)
+                                .padding(horizontal = 6.dp, vertical = 2.5.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
-                                Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(11.dp))
+                                Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(11.dp))
                                 Text(
                                     text = "ACTIVE",
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onPrimary,
                                     letterSpacing = 0.5.sp
                                 )
                             }
@@ -715,19 +727,18 @@ private fun ProfileCard(
                             ac?.category == TuningCategory.MEASUREMENT_CORRECTION -> accent
                             ac?.category == TuningCategory.COMMUNITY_PROFILE -> LocalExtendedColors.current.accentAmber
                             profile.matchesCategory(ProfileCategory.PHONE_SPEAKER) -> LocalExtendedColors.current.signalGreen
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> muted
                         }
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = badgeColor.copy(alpha = 0.12f),
-                            border = BorderStroke(0.8.dp, badgeColor.copy(alpha = 0.35f))
+                        Box(
+                            modifier = Modifier
+                                .tactileInset(shapeRadius = 6.dp, isDarkTheme = isDarkTheme, depth = 1.dp)
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = badgeText,
                                 fontSize = 8.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = badgeColor,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
                                 letterSpacing = 0.4.sp
                             )
                         }
@@ -748,7 +759,7 @@ private fun ProfileCard(
                     Text(
                         text = profile.subtitle,
                         fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = muted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -759,13 +770,19 @@ private fun ProfileCard(
 
             // Mini Frequency Sparkline Curve & Tag
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ProfileMiniCurve(
-                    profile = profile,
-                    isSelected = isSelected,
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(24.dp)
-                )
+                        .height(26.dp)
+                        .tactileInset(shapeRadius = 6.dp, isDarkTheme = isDarkTheme, depth = 1.5.dp)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    ProfileMiniCurve(
+                        profile = profile,
+                        isSelected = isSelected,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 val tagText = ac?.targetCurve?.takeIf { it.isNotBlank() }
                     ?: if (profile.config.highPassCutoffHz > 100f) "${profile.config.highPassCutoffHz.toInt()} Hz HPF"
@@ -775,7 +792,7 @@ private fun ProfileCard(
                     text = tagText,
                     fontSize = 9.5.sp,
                     fontWeight = FontWeight.Medium,
-                    color = if (isSelected) accent.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = if (isSelected) accent.copy(alpha = 0.9f) else muted.copy(alpha = 0.7f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -791,25 +808,24 @@ private fun ProfileCard(
 private fun ProfileListItem(
     profile: TuningProfile,
     isSelected: Boolean,
+    isDarkTheme: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val accent = MaterialTheme.colorScheme.primary
-    val border = LocalExtendedColors.current.cardBorder
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val ac = profile.acousticProfile
 
-    OutlinedCard(
-        onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.outlinedCardColors(
-            containerColor = if (isSelected) accent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(
-            width = if (isSelected) 2.dp else 1.dp,
-            color = if (isSelected) accent else border
-        ),
+    Box(
         modifier = modifier
             .fillMaxWidth()
+            .tactileClickable(
+                shapeRadius = 14.dp,
+                isDarkTheme = isDarkTheme,
+                elevation = if (isSelected) 4.dp else 2.5.dp,
+                onClick = onClick
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp)
             .semantics {
                 role = Role.RadioButton
                 selected = isSelected
@@ -817,9 +833,7 @@ private fun ProfileListItem(
             }
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -827,15 +841,12 @@ private fun ProfileListItem(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .size(38.dp)
-                    .background(
-                        color = if (isSelected) accent.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(10.dp)
-                    )
+                    .tactileInset(shapeRadius = 10.dp, isDarkTheme = isDarkTheme, depth = 2.dp)
             ) {
                 Icon(
                     iconFor(profile),
                     contentDescription = null,
-                    tint = if (isSelected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (isSelected) accent else muted,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -859,16 +870,16 @@ private fun ProfileListItem(
                         modifier = Modifier.weight(1f, fill = false)
                     )
                     if (ac?.category == TuningCategory.MEASUREMENT_CORRECTION) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = accent.copy(alpha = 0.12f)
+                        Box(
+                            modifier = Modifier
+                                .tactileInset(shapeRadius = 4.dp, isDarkTheme = isDarkTheme, depth = 1.dp)
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
                         ) {
                             Text(
                                 text = "CALIBRATED",
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = accent,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                color = accent
                             )
                         }
                     }
@@ -876,7 +887,7 @@ private fun ProfileListItem(
                 Text(
                     text = profile.subtitle,
                     fontSize = 11.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -887,6 +898,8 @@ private fun ProfileListItem(
                 modifier = Modifier
                     .width(52.dp)
                     .height(24.dp)
+                    .tactileInset(shapeRadius = 6.dp, isDarkTheme = isDarkTheme, depth = 1.dp)
+                    .padding(2.dp)
             ) {
                 ProfileMiniCurve(
                     profile = profile,
@@ -897,32 +910,26 @@ private fun ProfileListItem(
 
             // Selection indicator
             if (isSelected) {
-                Surface(
-                    shape = CircleShape,
-                    color = accent,
-                    modifier = Modifier.size(22.dp)
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(accent),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = "Active",
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(13.dp)
-                        )
-                    }
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = "Active",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(13.dp)
+                    )
                 }
             } else {
                 Box(
-                    modifier = Modifier.size(22.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = Color.Transparent,
-                        border = BorderStroke(1.2.dp, border),
-                        modifier = Modifier.size(16.dp)
-                    ) {}
-                }
+                    modifier = Modifier
+                        .size(20.dp)
+                        .tactileInset(shapeRadius = 10.dp, isDarkTheme = isDarkTheme, depth = 1.dp)
+                )
             }
         }
     }
@@ -1024,47 +1031,3 @@ private fun ProfileMiniCurve(
         )
     }
 }
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, backgroundColor = 0xFF0B0E14)
-@Composable
-fun ProfileSelectorPreview() {
-    com.evenlouder.app.ui.theme.EvenLouderTheme(darkTheme = true) {
-        Surface(modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.background) {
-            ProfileSelector(
-                currentConfig = DspConfig(activeProfileId = "sennheiser_hd600_harman"),
-                onSelectProfile = {}
-            )
-        }
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, backgroundColor = 0xFF0B0E14)
-@Composable
-fun ProfileSelectorGridPreview() {
-    com.evenlouder.app.ui.theme.EvenLouderTheme(darkTheme = true) {
-        Surface(modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.background) {
-            ProfileSelector(
-                currentConfig = DspConfig(activeProfileId = "sony_wh1000xm4_harman"),
-                onSelectProfile = {},
-                initialViewMode = ProfileViewMode.GRID
-            )
-        }
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, backgroundColor = 0xFF0B0E14)
-@Composable
-fun ProfileSelectorListPreview() {
-    com.evenlouder.app.ui.theme.EvenLouderTheme(darkTheme = true) {
-        Surface(modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.background) {
-            ProfileSelector(
-                currentConfig = DspConfig(activeProfileId = "apple_airpods_pro_harman"),
-                onSelectProfile = {},
-                initialViewMode = ProfileViewMode.LIST
-            )
-        }
-    }
-}
-
-
-

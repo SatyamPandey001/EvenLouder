@@ -2,7 +2,6 @@ package com.evenlouder.app.ui.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material3.*
@@ -18,12 +17,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.evenlouder.app.ui.theme.LocalExtendedColors
+import com.evenlouder.app.ui.theme.tactileClickable
+import com.evenlouder.app.ui.theme.tactileInset
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Flat slider row (no card chrome) used inside the "Fine tune" section.
- * Snaps to 0.1 dB, gives a haptic tick at each whole dB, and offers a one-tap reset.
+ * Modern soft tactile slider control used inside the "Fine tune" and "Volume booster" sections.
+ * Features physical recessed readout inset, tactile reset knob, snap to 0.1 dB, and haptic feedback.
  */
 @Composable
 fun TactileSliderCard(
@@ -37,6 +39,8 @@ fun TactileSliderCard(
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val extendedColors = LocalExtendedColors.current
+    val isDark = extendedColors.isDark
     val accent = accentColor ?: MaterialTheme.colorScheme.primary
     val display = if (abs(value) < 0.05f) 0f else value
     val formatted = (if (display > 0) "+" else "") + "%.1f".format(display) + " " + unit
@@ -44,51 +48,67 @@ fun TactileSliderCard(
     val haptic = LocalHapticFeedback.current
     var lastDetent by remember { mutableStateOf(value.roundToInt()) }
 
-    Column(modifier = modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    Column(modifier = modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 if (isChanged) {
-                    Surface(
-                        onClick = { onValueChange(defaultValue) },
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.size(30.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .tactileClickable(shapeRadius = 8.dp, isDarkTheme = isDark, elevation = 2.dp) {
+                                onValueChange(defaultValue)
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Rounded.RestartAlt,
-                                contentDescription = "Reset $title",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        Icon(
+                            Icons.Rounded.RestartAlt,
+                            contentDescription = "Reset $title",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(17.dp)
+                        )
                     }
                 }
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = accent.copy(alpha = 0.12f),
-                    modifier = Modifier.clickable { onValueChange(defaultValue) }
+                // Recessed digital readout bezel
+                Box(
+                    modifier = Modifier
+                        .tactileInset(shapeRadius = 8.dp, isDarkTheme = isDark, depth = 2.5.dp)
+                        .clickable { onValueChange(defaultValue) }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        formatted,
+                        text = formatted,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
-                        color = accent,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        color = accent
                     )
                 }
             }
         }
 
+        Spacer(Modifier.height(4.dp))
+
+        // Recessed track slider
         Slider(
             value = value,
             onValueChange = { raw ->
@@ -106,9 +126,11 @@ fun TactileSliderCard(
             colors = SliderDefaults.colors(
                 thumbColor = accent,
                 activeTrackColor = accent,
-                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                inactiveTrackColor = if (isDark) Color(0xFF13161C) else Color(0xFFD3DAE2)
             ),
-            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "$title: $formatted" }
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "$title: $formatted" }
         )
     }
 }
