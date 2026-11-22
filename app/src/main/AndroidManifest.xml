@@ -5,11 +5,16 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <uses-permission android:name="android.permission.DUMP" tools:ignore="ProtectedPermissions" />
+    <!-- The service applies audio effects (it does not play media), so it uses specialUse -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Only grantable via: adb shell pm grant com.evenlouder.app android.permission.DUMP -->
+    <uses-permission
+        android:name="android.permission.DUMP"
+        tools:ignore="ProtectedPermissions" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="EvenLouder"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -19,8 +24,8 @@
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.EvenLouder.Starting"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.EvenLouder.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -30,8 +35,37 @@
         <service
             android:name=".core.session.AudioEngineService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Applies system-wide audio equalizer and dynamics processing to the device speaker while the user has tuning enabled" />
+        </service>
 
+        <!-- Quick Settings tile (notification shade) -->
+        <service
+            android:name=".core.session.EvenLouderTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_waveform"
+            android:label="EvenLouder"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Home-screen widget -->
+        <receiver
+            android:name=".widget.EvenLouderWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/evenlouder_widget_info" />
+        </receiver>
+
+        <!-- Must stay exported: media players send these broadcasts from other apps -->
         <receiver
             android:name=".core.session.AudioSessionReceiver"
             android:exported="true">
@@ -41,14 +75,10 @@
             </intent-filter>
         </receiver>
 
+        <!-- Internal: notification and widget buttons (explicit intents only) -->
         <receiver
             android:name=".core.session.NotificationActionReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.evenlouder.ACTION_TOGGLE_DSP" />
-                <action android:name="com.evenlouder.ACTION_SET_PROFILE" />
-            </intent-filter>
-        </receiver>
+            android:exported="false" />
 
     </application>
 

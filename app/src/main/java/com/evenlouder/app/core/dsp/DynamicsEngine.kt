@@ -1,12 +1,66 @@
 package com.evenlouder.app.core.dsp
 
 import android.media.audiofx.DynamicsProcessing
-import android.media.audiofx.DynamicsProcessing.*
 import android.util.Log
+import kotlin.math.exp
+import kotlin.math.log2
+import kotlin.math.sqrt
+
+data class EqPoint(val edgeHz: Float, val gainDb: Float)
 
 /**
- * Hardware-safe Android 15+ DynamicsProcessing AudioFX engine.
- * Calibrated specifically for micro-speakers (protecting against excursion & thermal damage).
+ * Single source of truth for the EQ. Engine and DspCurveVisualizer both read this table.
+ * 3 stepped sub-bass roll-off bands + 20 fixed log-spaced bands whose gains come from smooth
+ * bells (bass 300 Hz, de-box 950 Hz, presence 2.8 kHz) and a treble shelf (~5.5 kHz).
+ */
+object EqLayout {
+    private val FIXED_EDGES = floatArrayOf(
+        200f, 250f, 315f, 400f, 500f, 630f, 800f, 1000f, 1250f, 1600f,
+        2000f, 2500f, 3150f, 4000f, 5000f, 6300f, 8000f, 10000f, 13000f, 20000f
+    )
+    const val PRE_EQ_BAND_COUNT = 23   // 3 + FIXED_EDGES.size (20)
+    const val MBC_BAND_COUNT = 3
+
+    private fun bell(fc: Float, f0: Float, sigmaOct: Float, gain: Float): Float {
+        val x = log2(fc / f0) / sigmaOct
+        return gain * exp(-0.5f * x * x)
+    }
+
+    private fun shelf(fc: Float, f0: Float, gain: Float): Float =
+        gain / (1f + exp(-2.2f * log2(fc / f0)))
+
+    fun build(config: DspConfig): List<EqPoint> {
+        check(FIXED_EDGES.size + 3 == PRE_EQ_BAND_COUNT)
+        val hpf = config.highPassCutoffHz.coerceIn(80f, 180f)
+        val on = config.eqEnabled
+        val bass = if (on) config.bassGainDb.coerceIn(0f, 10f) else 0f
+        val box = if (on) config.boxinessCutDb.coerceIn(-10f, 0f) else 0f
+        val vocal = if (on) config.vocalClarityDb.coerceIn(-6f, 10f) else 0f
+        val treble = if (on) config.trebleGainDb.coerceIn(-6f, 10f) else 0f
+
+        val out = ArrayList<EqPoint>(PRE_EQ_BAND_COUNT)
+        out += EqPoint(hpf * 0.5f, -24f)
+        out += EqPoint(hpf * 0.75f, -14f)
+        out += EqPoint(hpf, -6f)
+
+        var low = hpf
+        for (edge in FIXED_EDGES) {
+            val fc = sqrt(low * edge)
+            val g = bell(fc, 300f, 0.8f, bass) +
+                bell(fc, 950f, 0.7f, box) +
+                bell(fc, 2800f, 0.9f, vocal) +
+                shelf(fc, 5500f, treble)
+            out += EqPoint(edge, g.coerceIn(-15f, 12f))
+            low = edge
+        }
+        return out
+    }
+}
+
+/**
+ * Chain: input gain (boost - trim) -> 23-band Pre-EQ -> 3-band MBC -> limiter.
+ * Self-healing: if the effect lost control or throws, it is rebuilt once and re-applied.
+ * applyConfig returns false only if the session cannot be recovered.
  */
 class DynamicsEngine(
     private val audioSessionId: Int,
@@ -14,197 +68,116 @@ class DynamicsEngine(
 ) {
     companion object {
         private const val TAG = "DynamicsEngine"
+        private const val MBC_LOW_EDGE = 500f
+        private const val MBC_MID_EDGE = 4000f
+        private const val MBC_HIGH_EDGE = 20000f
     }
 
     private var effect: DynamicsProcessing? = null
+
     var currentConfig: DspConfig = DspConfig()
         private set
 
-    init {
-        initialize()
+    val isReady: Boolean get() = effect != null
+
+    init { create() }
+
+    private fun create(): Boolean = try {
+        val builder = DynamicsProcessing.Config.Builder(
+            DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
+            channelCount,
+            true, EqLayout.PRE_EQ_BAND_COUNT,
+            true, EqLayout.MBC_BAND_COUNT,
+            false, 0,
+            true
+        )
+        effect = DynamicsProcessing(0, audioSessionId, builder.build())
+        true
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to create effect for session $audioSessionId", e)
+        effect = null
+        false
     }
 
-    private fun initialize() {
-        try {
-            val builder = Config.Builder(
-                DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
-                channelCount,
-                true, DspConfig.PRE_EQ_BANDS,
-                true, DspConfig.MBC_BANDS,
-                false, 0, // Post-EQ disabled to avoid uninitialized biquad filter NaNs
-                true      // Peak limiter enabled
-            )
-
-            val baseConfig = builder.build()
-            effect = DynamicsProcessing(0, audioSessionId, baseConfig)
-            applyConfig(currentConfig)
-            Log.i(TAG, "Initialized DynamicsEngine for session $audioSessionId on $channelCount channels")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize DynamicsEngine for session $audioSessionId", e)
-            effect = null
-        }
+    private fun recreate(): Boolean {
+        try { effect?.release() } catch (_: Exception) {}
+        effect = null
+        return create()
     }
 
-    fun applyConfig(config: DspConfig) {
-        val fx = effect ?: return
+    @Synchronized
+    fun applyConfig(config: DspConfig): Boolean {
         currentConfig = config
-
-        try {
-            if (!config.enabled) {
-                // Neutralize DSP to 100% transparent unity gain across all channels and disable sub-stages
-                for (ch in 0 until channelCount) {
-                    val preEq = fx.getPreEqByChannelIndex(ch)
-                    for (b in 0 until DspConfig.PRE_EQ_BANDS) {
-                        preEq.getBand(b).apply {
-                            gain = 0.0f
-                            setEnabled(false)
-                        }
-                    }
-                    preEq.setEnabled(false)
-                    fx.setPreEqByChannelIndex(ch, preEq)
-
-                    val mbc = fx.getMbcByChannelIndex(ch)
-                    for (b in 0 until DspConfig.MBC_BANDS) {
-                        mbc.getBand(b).apply {
-                            preGain = 0.0f
-                            postGain = 0.0f
-                            setEnabled(false)
-                        }
-                    }
-                    mbc.setEnabled(false)
-                    fx.setMbcByChannelIndex(ch, mbc)
-
-                    val limiter = fx.getLimiterByChannelIndex(ch)
-                    limiter.apply {
-                        postGain = 0.0f
-                        setEnabled(false)
-                    }
-                    limiter.setEnabled(false)
-                    fx.setLimiterByChannelIndex(ch, limiter)
-                }
-                fx.enabled = false
-                return
-            }
-
-            fx.enabled = true
-            for (ch in 0 until channelCount) {
-                // 1. Pre-EQ: Sub-bass high-pass + 280Hz MaxxBass punch + 950Hz de-box + 2.8kHz vocal + 7.5kHz treble + 13.5kHz air
-                val preEq = fx.getPreEqByChannelIndex(ch)
-                preEq.setEnabled(true)
-
-                // Band 0: Sub-bass excursion protection filter
-                preEq.getBand(0).apply {
-                    cutoffFrequency = config.highPassCutoffHz
-                    gain = -18f
-                    setEnabled(true)
-                }
-                // Band 1: Upper-bass harmonic punch / MaxxBass resonance (280 Hz)
-                preEq.getBand(1).apply {
-                    cutoffFrequency = 280f
-                    gain = config.bassGainDb.coerceIn(0f, 6f)
-                    setEnabled(true)
-                }
-                // Band 2: Anti-Boxiness / Chassis Resonance Dip (950 Hz)
-                preEq.getBand(2).apply {
-                    cutoffFrequency = 950f
-                    gain = config.boxinessCutDb.coerceIn(-6f, 0f)
-                    setEnabled(true)
-                }
-                // Band 3: Vocal & dialogue presence (2.8 kHz Fletcher-Munson peak)
-                preEq.getBand(3).apply {
-                    cutoffFrequency = 2800f
-                    gain = config.vocalClarityDb.coerceIn(0f, 6f)
-                    setEnabled(true)
-                }
-                // Band 4: Treble crispness & detail (7.5 kHz)
-                preEq.getBand(4).apply {
-                    cutoffFrequency = 7500f
-                    gain = config.trebleGainDb.coerceIn(0f, 6f)
-                    setEnabled(true)
-                }
-                // Band 5: Spatial air & sparkle (13.5 kHz)
-                preEq.getBand(5).apply {
-                    cutoffFrequency = 13500f
-                    gain = (config.trebleGainDb * 0.7f).coerceIn(0f, 4f)
-                    setEnabled(true)
-                }
-                fx.setPreEqByChannelIndex(ch, preEq)
-
-                // 2. Multi-Band Compressor (Mastering-grade Soft-Knee architecture)
-                val mbc = fx.getMbcByChannelIndex(ch)
-                mbc.setEnabled(true)
-                val makeup = config.loudnessGainDb.coerceIn(0f, 6f)
-
-                // Low band (135Hz - 550Hz) - Tight punch control, soft-knee analog warmth
-                mbc.getBand(0).apply {
-                    cutoffFrequency = 550f
-                    threshold = -16f
-                    ratio = 3.5f
-                    attackTime = 14f
-                    releaseTime = 80f
-                    kneeWidth = 5.0f // Smooth soft-knee analog warmth
-                    noiseGateThreshold = -90.0f // Explicitly disabled
-                    expanderRatio = 1.0f
-                    preGain = 0.0f
-                    postGain = (makeup * 0.85f)
-                    setEnabled(true)
-                }
-                // Mid band (550Hz - 4200Hz) - Dialogue leveling, transparent optical release
-                mbc.getBand(1).apply {
-                    cutoffFrequency = 4200f
-                    threshold = -13f
-                    ratio = 2.2f
-                    attackTime = 10f
-                    releaseTime = 90f
-                    kneeWidth = 6.0f // Mastering-grade soft knee eliminates pumping
-                    noiseGateThreshold = -90.0f
-                    expanderRatio = 1.0f
-                    preGain = 0.0f
-                    postGain = makeup
-                    setEnabled(true)
-                }
-                // High band (4200Hz - 20000Hz) - High-end air sparkle, fast limiter response
-                mbc.getBand(2).apply {
-                    cutoffFrequency = 20000f
-                    threshold = -12f
-                    ratio = 2.0f
-                    attackTime = 5f
-                    releaseTime = 60f
-                    kneeWidth = 4.0f
-                    noiseGateThreshold = -90.0f
-                    expanderRatio = 1.0f
-                    preGain = 0.0f
-                    postGain = (makeup * 0.75f)
-                    setEnabled(true)
-                }
-                fx.setMbcByChannelIndex(ch, mbc)
-
-                // 3. Peak Limiter: Strict -0.5 dBFS ceiling to prevent clipping & SmartPA ducking
-                val limiter = fx.getLimiterByChannelIndex(ch)
-                limiter.setEnabled(true)
-                limiter.apply {
-                    threshold = config.limiterCeilingDb.coerceIn(-6f, -0.1f)
-                    attackTime = 1.0f
-                    releaseTime = 50.0f
-                    ratio = 12f
-                    linkGroup = 0
-                    postGain = 0.0f
-                    setEnabled(true)
-                }
-                fx.setLimiterByChannelIndex(ch, limiter)
-            }
+        var fx = effect
+        if (fx == null) {
+            if (!create()) return false
+            fx = effect ?: return false
+        }
+        if (!fx.hasControl()) {
+            Log.w(TAG, "Lost control of session $audioSessionId, rebuilding")
+            if (!recreate()) return false
+            fx = effect ?: return false
+        }
+        return try {
+            write(fx, config)
+            true
         } catch (e: Exception) {
-            Log.e(TAG, "Error applying DspConfig to session $audioSessionId", e)
+            Log.w(TAG, "Apply failed on session $audioSessionId, rebuilding once", e)
+            if (!recreate()) return false
+            try { write(effect ?: return false, config); true }
+            catch (e2: Exception) { Log.e(TAG, "Apply failed after rebuild", e2); false }
         }
     }
 
+    private fun write(fx: DynamicsProcessing, c: DspConfig) {
+        if (!c.enabled) {
+            fx.setInputGainAllChannelsTo(0f)
+            fx.enabled = false
+            return
+        }
+
+        val boost = c.volumeBoostDb.coerceIn(0f, DspConfig.MAX_BOOST_DB)
+        val eq = EqLayout.build(c)
+        val peak = eq.maxOf { it.gainDb }.coerceAtLeast(0f)
+        // Headroom trim only matters when EQ boosts; boost-only mode has none.
+        val trim = if (c.eqEnabled) (peak * 0.5f).coerceAtMost(4f) else 0f
+        fx.setInputGainAllChannelsTo(boost - trim)
+
+        val makeup = if (c.eqEnabled) c.loudnessGainDb.coerceIn(0f, 6f) else 0f
+        val extraRatio = boost * 0.15f   // firmer compression as boost rises
+
+        // Pre-EQ
+        val preEq = DynamicsProcessing.Eq(true, true, EqLayout.PRE_EQ_BAND_COUNT)
+        eq.forEachIndexed { i, p -> preEq.setBand(i, DynamicsProcessing.EqBand(true, p.edgeHz, p.gainDb)) }
+        fx.setPreEqAllChannelsTo(preEq)
+
+        // MBC: (enabled, cutoff, attack, release, ratio, threshold, knee, gate, expander, preGain, postGain)
+        val mbc = DynamicsProcessing.Mbc(true, true, EqLayout.MBC_BAND_COUNT)
+        mbc.setBand(0, DynamicsProcessing.MbcBand(true, MBC_LOW_EDGE, 18f, 120f,
+            2.0f + extraRatio, -22f, 8f, -90f, 1f, 0f, makeup * 0.8f))
+        mbc.setBand(1, DynamicsProcessing.MbcBand(true, MBC_MID_EDGE, 12f, 130f,
+            1.8f + extraRatio, -20f, 8f, -90f, 1f, 0f, makeup))
+        mbc.setBand(2, DynamicsProcessing.MbcBand(true, MBC_HIGH_EDGE, 6f, 90f,
+            2.0f + extraRatio, -20f, 6f, -90f, 1f, 0f, makeup * 0.7f))
+        fx.setMbcAllChannelsTo(mbc)
+
+        // Limiter: (inUse, enabled, linkGroup, attack, release, ratio, threshold, postGain)
+        val limiter = DynamicsProcessing.Limiter(true, true, 0, 1f, 80f, 20f,
+            c.limiterCeilingDb.coerceIn(-6f, -0.1f), 0f)
+        fx.setLimiterAllChannelsTo(limiter)
+
+        fx.enabled = true
+    }
+
+    @Synchronized
     fun release() {
         try {
-            applyConfig(currentConfig.copy(enabled = false))
-            effect?.enabled = false
-            effect?.release()
+            effect?.let {
+                it.enabled = false
+                it.release()
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error releasing DynamicsEngine", e)
+            Log.e(TAG, "Error releasing", e)
         } finally {
             effect = null
         }

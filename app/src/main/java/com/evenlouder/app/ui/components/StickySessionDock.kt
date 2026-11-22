@@ -39,18 +39,6 @@ fun StickySessionDock(
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
 
-    // Pulse animation for active session indicator
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseAlpha"
-    )
-
     Surface(
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -83,17 +71,9 @@ fun StickySessionDock(
                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                 }
 
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(
-                            if (activeSessions.isNotEmpty() || isTestAudioPlaying) {
-                                beaconColor.copy(alpha = pulseAlpha)
-                            } else {
-                                beaconColor
-                            }
-                        )
+                StatusBeacon(
+                    color = beaconColor,
+                    pulsing = activeSessions.isNotEmpty() || isTestAudioPlaying
                 )
 
                 Column {
@@ -156,4 +136,31 @@ fun StickySessionDock(
             }
         }
     }
+}
+
+
+/** Status dot. The infinite animation only runs while pulsing, so an idle dock costs no frames. */
+@Composable
+private fun StatusBeacon(color: Color, pulsing: Boolean) {
+    val alpha = if (pulsing) {
+        val transition = rememberInfiniteTransition(label = "pulse")
+        val animated by transition.animateFloat(
+            initialValue = 0.4f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(800, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulseAlpha"
+        )
+        animated
+    } else {
+        1f
+    }
+    Box(
+        modifier = Modifier
+            .size(10.dp)
+            .clip(RoundedCornerShape(5.dp))
+            .background(color.copy(alpha = alpha))
+    )
 }

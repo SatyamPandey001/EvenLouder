@@ -8,16 +8,24 @@ import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.media.audiofx.AudioEffect
+import android.os.Build
+import android.os.SystemClock
 import android.media.AudioManager
 import android.media.AudioPlaybackConfiguration
 import android.os.Binder
 import android.os.IBinder
 import android.util.Log
+import com.evenlouder.app.R
 import com.evenlouder.app.core.dsp.DspConfig
 import com.evenlouder.app.core.dsp.DynamicsEngine
 import com.evenlouder.app.core.dsp.TuningProfile
+import com.evenlouder.app.core.dsp.applyingProfile
 import com.evenlouder.app.ui.MainActivity
+import com.evenlouder.app.widget.EvenLouderWidget
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.ConcurrentHashMap
@@ -31,13 +39,17 @@ class AudioEngineService : Service() {
 
     companion object {
         private const val TAG = "AudioEngineService"
-        private const val CHANNEL_ID = "evenlouder_audio_channel_v3"
+        private const val CHANNEL_ID = "evenlouder_audio_channel_v4"
         private const val NOTIFICATION_ID = 1001
+        private const val MAX_EXTERNAL_SESSIONS = 16     // caps resource use if apps spam broadcasts
+        private const val FAILED_RETRY_MS = 2_000L        // fast retry for tracks still negotiating mixer buffers
 
         const val ACTION_ATTACH_SESSION = "com.evenlouder.ACTION_ATTACH_SESSION"
         const val ACTION_DETACH_SESSION = "com.evenlouder.ACTION_DETACH_SESSION"
         const val ACTION_TOGGLE_DSP = "com.evenlouder.ACTION_TOGGLE_DSP"
         const val ACTION_SET_PROFILE = "com.evenlouder.ACTION_SET_PROFILE"
+        const val ACTION_NEXT_PROFILE = "com.evenlouder.ACTION_NEXT_PROFILE"
+        const val ACTION_PREV_PROFILE = "com.evenlouder.ACTION_PREV_PROFILE"
 
         const val EXTRA_SESSION_ID = "extra_session_id"
         const val EXTRA_CLIENT_PKG = "extra_client_pkg"
@@ -75,11 +87,15 @@ class AudioEngineService : Service() {
     private val sessionPackages = ConcurrentHashMap<Int, String>()
     private val sessionOrigins = ConcurrentHashMap<Int, SessionOrigin>()
     private val missedScanCounts = ConcurrentHashMap<Int, Int>()
+    private val failedAttempts = ConcurrentHashMap<Int, Long>()
+    private val failedAttemptCounts = ConcurrentHashMap<Int, Int>()
+    private val applyChannel = Channel<Unit>(Channel.CONFLATED)
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var scannerJob: Job? = null
     private var playbackCallback: AudioManager.AudioPlaybackCallback? = null
 
+    @Volatile
     var currentConfig: DspConfig = TuningProfile.DOLBY_SPATIAL.config
         private set
 
@@ -89,38 +105,54 @@ class AudioEngineService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        loadSavedConfig()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= 34) {
+            // Must match android:foregroundServiceType in the manifest
+            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
         registerPlaybackCallback()
+        startApplyWorker()
         if (currentConfig.globalHookEnabled) {
             startSessionScanner()
         }
         Log.i(TAG, "AudioEngineService started in foreground")
     }
 
+    /** One serial worker: always applies the LATEST config, never overlaps, never runs on the UI thread. */
+    private fun startApplyWorker() {
+        serviceScope.launch {
+            for (dummy in applyChannel) {
+                val cfg = currentConfig
+                for ((id, engine) in activeEngines) {
+                    if (!engine.applyConfig(cfg)) {
+                        Log.w(TAG, "Session $id unrecoverable, detaching")
+                        detachSession(id)
+                    }
+                }
+            }
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.let {
             when (it.action) {
-                ACTION_ATTACH_SESSION -> {
-                    val sessionId = it.getIntExtra(EXTRA_SESSION_ID, 0)
-                    val pkg = it.getStringExtra(EXTRA_CLIENT_PKG) ?: "External"
-                    if (sessionId > 0) attachSession(sessionId, pkg)
+                ACTION_ATTACH_SESSION, AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION -> {
+                    val sessionId = it.getIntExtra(AudioEffect.EXTRA_AUDIO_SESSION, 0).takeIf { id -> id > 0 }
+                        ?: it.getIntExtra(EXTRA_SESSION_ID, 0)
+                    val pkg = it.getStringExtra(AudioEffect.EXTRA_PACKAGE_NAME)
+                        ?: it.getStringExtra(EXTRA_CLIENT_PKG)
+                        ?: "External"
+                    if (sessionId > 0 && currentConfig.globalHookEnabled) attachSession(sessionId, pkg, SessionOrigin.BROADCAST)
                 }
-                ACTION_DETACH_SESSION -> {
-                    val sessionId = it.getIntExtra(EXTRA_SESSION_ID, 0)
+                ACTION_DETACH_SESSION, AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION -> {
+                    val sessionId = it.getIntExtra(AudioEffect.EXTRA_AUDIO_SESSION, 0).takeIf { id -> id > 0 }
+                        ?: it.getIntExtra(EXTRA_SESSION_ID, 0)
                     if (sessionId > 0) detachSession(sessionId)
                 }
-                ACTION_TOGGLE_DSP -> {
-                    updateConfig(currentConfig.copy(enabled = !currentConfig.enabled))
-                }
-                ACTION_SET_PROFILE -> {
-                    val profileName = it.getStringExtra(EXTRA_PROFILE_NAME)
-                    val profile = TuningProfile.values().firstOrNull { p -> p.name == profileName }
-                    profile?.let { p ->
-                        currentProfileName = p.title
-                        updateConfig(p.config.copy(globalHookEnabled = currentConfig.globalHookEnabled), p.title)
-                    }
-                }
+                else -> handleControlAction(it.action, it.getStringExtra(EXTRA_PROFILE_NAME))
             }
         }
         return START_STICKY
@@ -138,9 +170,43 @@ class AudioEngineService : Service() {
             return
         }
 
+        if (origin != SessionOrigin.INTERNAL && activeEngines.size >= MAX_EXTERNAL_SESSIONS) {
+            Log.w(TAG, "Session limit reached; ignoring session $sessionId")
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        val fails = failedAttemptCounts[sessionId] ?: 0
+        if (fails >= 3) {
+            val lastFail = failedAttempts[sessionId]
+            if (lastFail != null && now - lastFail < FAILED_RETRY_MS) return
+        }
+
         try {
-            val engine = DynamicsEngine(audioSessionId = sessionId, channelCount = 2)
-            engine.applyConfig(currentConfig)
+            var engine = DynamicsEngine(audioSessionId = sessionId, channelCount = 2)
+            if (!engine.isReady) {
+                engine.release()
+                // Retry with mono channel (1 channel) for podcasts, audiobooks, and browser voice
+                engine = DynamicsEngine(audioSessionId = sessionId, channelCount = 1)
+            }
+            if (!engine.isReady) {
+                if (failedAttempts.size > 64) {
+                    failedAttempts.clear()
+                    failedAttemptCounts.clear()
+                }
+                failedAttemptCounts[sessionId] = fails + 1
+                failedAttempts[sessionId] = now
+                engine.release()
+                Log.w(TAG, "Effect unavailable for session $sessionId ($pkg); will retry later")
+                return
+            }
+            if (!engine.applyConfig(currentConfig)) {
+                failedAttemptCounts[sessionId] = fails + 1
+                failedAttempts[sessionId] = now
+                engine.release()
+                return
+            }
+            failedAttempts.remove(sessionId)
+            failedAttemptCounts.remove(sessionId)
             activeEngines[sessionId] = engine
             sessionPackages[sessionId] = pkg
             sessionOrigins[sessionId] = origin
@@ -154,6 +220,8 @@ class AudioEngineService : Service() {
     @Synchronized
     fun detachSession(sessionId: Int) {
         missedScanCounts.remove(sessionId)
+        failedAttempts.remove(sessionId)
+        failedAttemptCounts.remove(sessionId)
         activeEngines.remove(sessionId)?.let { engine ->
             engine.release()
             sessionPackages.remove(sessionId)
@@ -162,6 +230,50 @@ class AudioEngineService : Service() {
             Log.i(TAG, "Detached DSP from session $sessionId. Remaining: ${activeEngines.size}")
         }
     }
+
+    /** Single entry point for notification buttons, widget buttons and the quick settings tile. */
+    fun handleControlAction(action: String?, profileName: String?) {
+        when (action) {
+            ACTION_TOGGLE_DSP -> toggleDsp()
+            ACTION_NEXT_PROFILE -> cycleProfile(+1)
+            ACTION_PREV_PROFILE -> cycleProfile(-1)
+            ACTION_SET_PROFILE -> {
+                val profile = TuningProfile.values().firstOrNull { p -> p.name == profileName } ?: return
+                updateConfig(currentConfig.applyingProfile(profile), profile.title)
+            }
+        }
+    }
+
+    fun toggleDsp() {
+        updateConfig(currentConfig.copy(enabled = !currentConfig.enabled))
+    }
+
+    /** Steps through the real presets (bypass excluded). Always leaves tuning switched on. */
+    @Synchronized
+    fun cycleProfile(step: Int) {
+        val list = TuningProfile.values().filter { it != TuningProfile.BYPASS }
+        val index = list.indexOfFirst { it.title == currentProfileName }
+        val next = if (index < 0) {
+            if (step > 0) 0 else list.lastIndex
+        } else {
+            Math.floorMod(index + step, list.size)
+        }
+        val profile = list[next]
+        updateConfig(currentConfig.applyingProfile(profile), profile.title)
+    }
+
+    /** Name of the preset whose values equal [c], or null if the user has customised it. */
+    private fun matchProfileTitle(c: DspConfig): String? =
+        TuningProfile.values().firstOrNull { p ->
+            c.eqEnabled &&
+                p != TuningProfile.BYPASS &&
+                kotlin.math.abs(c.highPassCutoffHz - p.config.highPassCutoffHz) < 0.5f &&
+                kotlin.math.abs(c.bassGainDb - p.config.bassGainDb) < 0.05f &&
+                kotlin.math.abs(c.boxinessCutDb - p.config.boxinessCutDb) < 0.05f &&
+                kotlin.math.abs(c.vocalClarityDb - p.config.vocalClarityDb) < 0.05f &&
+                kotlin.math.abs(c.trebleGainDb - p.config.trebleGainDb) < 0.05f &&
+                kotlin.math.abs(c.loudnessGainDb - p.config.loudnessGainDb) < 0.05f
+        }?.title
 
     fun hasDumpPermission(): Boolean {
         return checkSelfPermission(android.Manifest.permission.DUMP) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -174,12 +286,12 @@ class AudioEngineService : Service() {
         currentConfig = newConfig
         if (profileTitle != null) {
             currentProfileName = profileTitle
+        } else if (newConfig.enabled) {
+            currentProfileName = if (!newConfig.eqEnabled) "Boost only"
+                                 else matchProfileTitle(newConfig) ?: "Custom"
         }
 
-        // Apply updated config (or physical bypass) to all tracked sessions
-        for ((_, engine) in activeEngines) {
-            engine.applyConfig(newConfig)
-        }
+        applyChannel.trySend(Unit)
 
         if (!newConfig.enabled && wasEnabled) {
             Log.i(TAG, "DSP TURNED OFF: Bypassed all active effects on hardware channels")
@@ -202,6 +314,7 @@ class AudioEngineService : Service() {
             }
         }
 
+        saveConfig()
         updateNotification()
     }
 
@@ -209,13 +322,92 @@ class AudioEngineService : Service() {
         return activeEngines.keys.map { id -> id to (sessionPackages[id] ?: "Active Stream") }
     }
 
+    private fun extractSessionId(config: AudioPlaybackConfiguration): Int? {
+        try {
+            val method = config.javaClass.getMethod("getSessionId")
+            val id = (method.invoke(config) as? Number)?.toInt()
+            if (id != null && id > 0) return id
+        } catch (_: Throwable) {}
+        try {
+            val field = config.javaClass.getDeclaredField("mSessionId")
+            field.isAccessible = true
+            val id = field.getInt(config)
+            if (id > 0) return id
+        } catch (_: Throwable) {}
+        try {
+            val match = DUMPSYS_CONFIG_REGEX.find(config.toString())
+                ?: Regex("""sessionId:(\d+)""").find(config.toString())
+            if (match != null) {
+                val groupIdx = if (match.groupValues.size >= 4) 3 else 1
+                return match.groupValues[groupIdx].toIntOrNull()
+            }
+        } catch (_: Throwable) {}
+        return null
+    }
+
+    private fun extractClientUid(config: AudioPlaybackConfiguration): Int? {
+        try {
+            val method = config.javaClass.getMethod("getClientUid")
+            val uid = (method.invoke(config) as? Number)?.toInt()
+            if (uid != null && uid > 0) return uid
+        } catch (_: Throwable) {}
+        try {
+            val field = config.javaClass.getDeclaredField("mClientUid")
+            field.isAccessible = true
+            val uid = field.getInt(config)
+            if (uid > 0) return uid
+        } catch (_: Throwable) {}
+        try {
+            val match = Regex("""u/pid:(\d+)""").find(config.toString())
+                ?: Regex("""uid/pid:(\d+)""").find(config.toString())
+            if (match != null) {
+                return match.groupValues[1].toIntOrNull()
+            }
+        } catch (_: Throwable) {}
+        return null
+    }
+
+    private fun extractSessionsFromConfigs(
+        configs: List<AudioPlaybackConfiguration>,
+        discovered: MutableMap<Int, String>
+    ) {
+        for (config in configs) {
+            val sessionId = extractSessionId(config) ?: continue
+            val uid = extractClientUid(config) ?: -1
+            val pkg = if (uid > 0) resolvePackageName(uid) else "Media Player"
+            if (isValidExternalSession(uid, sessionId, pkg)) {
+                val isPlaying = try {
+                    (config.javaClass.getMethod("isActive").invoke(config) as? Boolean)
+                        ?: ((config.javaClass.getMethod("getPlayerState").invoke(config) as? Int) == 2)
+                } catch (_: Throwable) {
+                    true
+                }
+                if (isPlaying) {
+                    discovered[sessionId] = pkg
+                }
+            }
+        }
+    }
+
     private fun registerPlaybackCallback() {
         try {
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
             playbackCallback = object : AudioManager.AudioPlaybackCallback() {
                 override fun onPlaybackConfigChanged(configs: List<AudioPlaybackConfiguration>) {
                     if (currentConfig.globalHookEnabled) {
-                        serviceScope.launch { scanActiveSessions() }
+                        serviceScope.launch {
+                            val discovered = mutableMapOf<Int, String>()
+                            extractSessionsFromConfigs(configs, discovered)
+                            for ((sessionId, pkg) in discovered) {
+                                missedScanCounts[sessionId] = 0
+                                if (!activeEngines.containsKey(sessionId)) {
+                                    attachSession(sessionId, pkg, SessionOrigin.AUTO_SNIFFER)
+                                }
+                            }
+                            if (hasDumpPermission()) {
+                                scanActiveSessions()
+                            }
+                        }
                     }
                 }
             }
@@ -227,18 +419,14 @@ class AudioEngineService : Service() {
 
     private fun startSessionScanner() {
         scannerJob?.cancel()
-        if (!hasDumpPermission()) {
-            Log.i(TAG, "DUMP permission not granted; passive broadcast mode active (zero polling overhead)")
-            return
-        }
         scannerJob = serviceScope.launch {
             while (isActive && currentConfig.globalHookEnabled) {
                 scanActiveSessions()
-                // shortcut: 15s poll saves CPU/battery; AudioPlaybackCallback handles instant stream start/stop events
-                delay(15000)
+                // 4s polling detects new browser tabs and music tracks promptly
+                delay(4000)
             }
         }
-        Log.i(TAG, "Started background audio session scanner (audioflinger & audio)")
+        Log.i(TAG, "Started background audio session scanner")
     }
 
     private fun stopSessionScanner() {
@@ -352,9 +540,16 @@ class AudioEngineService : Service() {
 
         val discovered = mutableMapOf<Int, String>()
 
+        try {
+            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+            extractSessionsFromConfigs(audioManager.activePlaybackConfigurations, discovered)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed reading activePlaybackConfigurations", e)
+        }
+
         if (hasDumpPermission()) {
-            parseAudioDump("dumpsys media.audio_flinger", discovered)
-            parseAudioDump("dumpsys audio", discovered)
+            val cmd = if (java.io.File("/system/bin/dumpsys").exists()) "/system/bin/dumpsys audio" else "dumpsys audio"
+            parseAudioDump(cmd, discovered)
         }
 
         // Attach newly discovered active sessions
@@ -365,19 +560,17 @@ class AudioEngineService : Service() {
             }
         }
 
-        // Detach sessions only after 2 consecutive missed scans to avoid transient audio drops
-        if (discovered.isNotEmpty()) {
-            val autoSniffed = activeEngines.keys.filter { id ->
-                sessionOrigins[id] == SessionOrigin.AUTO_SNIFFER
-            }
-            for (id in autoSniffed) {
-                if (!discovered.containsKey(id)) {
-                    val missed = (missedScanCounts[id] ?: 0) + 1
-                    missedScanCounts[id] = missed
-                    if (missed >= 2) {
-                        missedScanCounts.remove(id)
-                        detachSession(id)
-                    }
+        // Detach sessions only after 4 consecutive missed scans to avoid transient audio drops during buffering
+        val autoSniffed = activeEngines.keys.filter { id ->
+            sessionOrigins[id] == SessionOrigin.AUTO_SNIFFER
+        }
+        for (id in autoSniffed) {
+            if (!discovered.containsKey(id)) {
+                val missed = (missedScanCounts[id] ?: 0) + 1
+                missedScanCounts[id] = missed
+                if (missed >= 4) {
+                    missedScanCounts.remove(id)
+                    detachSession(id)
                 }
             }
         }
@@ -387,14 +580,14 @@ class AudioEngineService : Service() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "EvenLouder Audio Tuning Service",
-            NotificationManager.IMPORTANCE_DEFAULT
+            NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = "Maintains micro-speaker dynamics tuning in the background"
             setShowBadge(false)
             setSound(null, null)      // Completely silent: no chimes or beeps on updates
             enableVibration(false)    // No vibration
         }
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(channel)
     }
 
@@ -415,56 +608,109 @@ class AudioEngineService : Service() {
 
     private fun buildNotification(): Notification {
         val count = activeEngines.size
-        val isEnabled = currentConfig.enabled
+        val enabled = currentConfig.enabled
 
-        val toggleLabel = if (isEnabled) "Turn OFF" else "Turn ON"
-        val togglePendingIntent = createActionPendingIntent(ACTION_TOGGLE_DSP, reqCode = 1)
+        val togglePending = createActionPendingIntent(ACTION_TOGGLE_DSP, reqCode = 1)
+        val prevPending = createActionPendingIntent(ACTION_PREV_PROFILE, reqCode = 2)
+        val nextPending = createActionPendingIntent(ACTION_NEXT_PROFILE, reqCode = 3)
 
-        val dolbyPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.DOLBY_SPATIAL.name, reqCode = 2)
-        val maxxBassPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.MAXX_BASS.name, reqCode = 3)
-        val hifiPendingIntent = createActionPendingIntent(ACTION_SET_PROFILE, TuningProfile.DIRAC_HIFI.name, reqCode = 4)
-
-        val mainActivityIntent = Intent(this, MainActivity::class.java)
-        val contentPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            mainActivityIntent,
+        val contentPending = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val summaryText = if (isEnabled) {
-            "DSP ACTIVE • Profile: $currentProfileName ($count stream${if (count == 1) "" else "s"})"
+        val title = if (enabled) currentProfileName else "Tuning off"
+        val text = when {
+            !enabled -> "Original phone sound"
+            count == 0 -> "Waiting for audio"
+            else -> "Tuning $count stream${if (count == 1) "" else "s"}"
+        }
+        val boostText = if (currentConfig.volumeBoostDb > 0.05f) " · Boost ${"%+.1f".format(currentConfig.volumeBoostDb)} dB" else ""
+        val details = if (enabled) {
+            "Bass ${"%+.1f".format(currentConfig.bassGainDb)} · " +
+                "Voice ${"%+.1f".format(currentConfig.vocalClarityDb)} · " +
+                "Treble ${"%+.1f".format(currentConfig.trebleGainDb)} · " +
+                "Loudness ${"%+.1f".format(currentConfig.loudnessGainDb)} dB$boostText\n" +
+                "Use Previous / Next to switch profile."
         } else {
-            "DSP BYPASSED • Pure Stock Speaker Audio"
+            "Tap Turn on to bring tuning back."
         }
 
-        val expandedDetails = if (isEnabled) {
-            "Current Profile: $currentProfileName\n" +
-                    "Active Streams: $count\n" +
-                    "Loudness: +${"%.1f".format(currentConfig.loudnessGainDb)} dB • Vocal: +${"%.1f".format(currentConfig.vocalClarityDb)} dB • De-Box: ${"%.1f".format(currentConfig.boxinessCutDb)} dB • Bass: +${"%.1f".format(currentConfig.bassGainDb)} dB\n" +
-                    "Limiter locked @ -0.5 dBFS"
-        } else {
-            "DSP is completely released from audio hardware. Tap Turn ON or select a profile to re-engage."
-        }
-
-        return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("EvenLouder Audio Engine")
-            .setContentText(summaryText)
-            .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
-            .setContentIntent(contentPendingIntent)
+        val builder = Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_waveform)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSubText("EvenLouder")
+            .setContentIntent(contentPending)
             .setOngoing(true)
-            .setOnlyAlertOnce(true) // Never beep or play sounds when updating state
-            .setStyle(Notification.BigTextStyle().bigText(expandedDetails))
-            .addAction(Notification.Action.Builder(null, toggleLabel, togglePendingIntent).build())
-            .addAction(Notification.Action.Builder(null, "Cinema 3D", dolbyPendingIntent).build())
-            .addAction(Notification.Action.Builder(null, "Club Bass", maxxBassPendingIntent).build())
-            .addAction(Notification.Action.Builder(null, "Hi-Fi", hifiPendingIntent).build())
-            .build()
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setColor(0xFF00796B.toInt())
+            .setStyle(Notification.BigTextStyle().bigText(details))
+            .addAction(Notification.Action.Builder(null, if (enabled) "Turn off" else "Turn on", togglePending).build())
+            .addAction(Notification.Action.Builder(null, "Previous", prevPending).build())
+            .addAction(Notification.Action.Builder(null, "Next", nextPending).build())
+
+        if (Build.VERSION.SDK_INT >= 31) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+        return builder.build()
     }
 
+    @Volatile
+    private var notifyJob: Job? = null
+
+    /** Debounced: slider drags would otherwise post dozens of notification updates per second. */
     private fun updateNotification() {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification())
+        notifyJob?.cancel()
+        notifyJob = serviceScope.launch {
+            delay(250)
+            val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(NOTIFICATION_ID, buildNotification())
+            // Keep home-screen widget and quick settings tile in sync with the same state
+            EvenLouderWidget.refresh(applicationContext)
+            EvenLouderTileService.requestRefresh(applicationContext)
+        }
+    }
+
+    private fun loadSavedConfig() {
+        val p = getSharedPreferences("evenlouder_prefs", MODE_PRIVATE)
+        if (!p.contains("hpf")) return
+        val d = DspConfig()
+        currentConfig = DspConfig(
+            enabled = p.getBoolean("enabled", d.enabled),
+            eqEnabled = p.getBoolean("eq_on", d.eqEnabled),
+            highPassCutoffHz = p.getFloat("hpf", d.highPassCutoffHz),
+            bassGainDb = p.getFloat("bass", d.bassGainDb),
+            boxinessCutDb = p.getFloat("box", d.boxinessCutDb),
+            vocalClarityDb = p.getFloat("vocal", d.vocalClarityDb),
+            trebleGainDb = p.getFloat("treble", d.trebleGainDb),
+            loudnessGainDb = p.getFloat("loudness", d.loudnessGainDb),
+            limiterCeilingDb = p.getFloat("limiter", d.limiterCeilingDb),
+            volumeBoostDb = p.getFloat("boost", d.volumeBoostDb),
+            globalHookEnabled = p.getBoolean("hook", d.globalHookEnabled)
+        )
+        currentProfileName = p.getString("profile", currentProfileName) ?: currentProfileName
+    }
+
+    private fun saveConfig() {
+        val c = currentConfig
+        getSharedPreferences("evenlouder_prefs", MODE_PRIVATE).edit()
+            .putBoolean("enabled", c.enabled)
+            .putBoolean("eq_on", c.eqEnabled)
+            .putFloat("hpf", c.highPassCutoffHz)
+            .putFloat("bass", c.bassGainDb)
+            .putFloat("box", c.boxinessCutDb)
+            .putFloat("vocal", c.vocalClarityDb)
+            .putFloat("treble", c.trebleGainDb)
+            .putFloat("loudness", c.loudnessGainDb)
+            .putFloat("limiter", c.limiterCeilingDb)
+            .putFloat("boost", c.volumeBoostDb)
+            .putBoolean("hook", c.globalHookEnabled)
+            .putString("profile", currentProfileName)
+            .apply()
     }
 
     override fun onDestroy() {
@@ -472,11 +718,12 @@ class AudioEngineService : Service() {
         stopSessionScanner()
         try {
             playbackCallback?.let {
-                val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
                 audioManager.unregisterAudioPlaybackCallback(it)
             }
         } catch (_: Exception) {}
 
+        applyChannel.close()
         serviceScope.cancel()
         for ((_, engine) in activeEngines) {
             engine.release()
@@ -485,14 +732,16 @@ class AudioEngineService : Service() {
         sessionPackages.clear()
         sessionOrigins.clear()
         missedScanCounts.clear()
+        failedAttempts.clear()
+        failedAttemptCounts.clear()
         instance = null
         Log.i(TAG, "AudioEngineService destroyed")
     }
 }
 
 /**
- * Handles action clicks directly from notifications via Broadcasts.
- * Broadcasts execute immediately and bypass Android 14/15 background service launch restrictions.
+ * Receives button taps from the notification, the home-screen widget and similar surfaces.
+ * Broadcasts run immediately and bypass background service launch restrictions.
  */
 class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -502,21 +751,14 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 action = intent.action
                 putExtras(intent)
             }
-            context.startForegroundService(serviceIntent)
+            try {
+                context.startForegroundService(serviceIntent)
+            } catch (e: Exception) {
+                // Background start can be denied by the OS; never crash from a tap
+                Log.w("NotificationActionReceiver", "Could not start service", e)
+            }
             return
         }
-
-        when (intent.action) {
-            AudioEngineService.ACTION_TOGGLE_DSP -> {
-                service.updateConfig(service.currentConfig.copy(enabled = !service.currentConfig.enabled))
-            }
-            AudioEngineService.ACTION_SET_PROFILE -> {
-                val profileName = intent.getStringExtra(AudioEngineService.EXTRA_PROFILE_NAME)
-                val profile = TuningProfile.values().firstOrNull { it.name == profileName }
-                profile?.let { p ->
-                    service.updateConfig(p.config.copy(globalHookEnabled = service.currentConfig.globalHookEnabled), p.title)
-                }
-            }
-        }
+        service.handleControlAction(intent.action, intent.getStringExtra(AudioEngineService.EXTRA_PROFILE_NAME))
     }
 }

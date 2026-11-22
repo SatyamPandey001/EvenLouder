@@ -1,8 +1,6 @@
 package com.evenlouder.app.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -11,19 +9,21 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.evenlouder.app.ui.theme.LocalExtendedColors
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
- * Premium tactile slider card with high-contrast text, smooth continuous track,
- * accessible screen-reader tags, and quick reset-to-unity action.
+ * Flat slider row (no card chrome) used inside the "Fine tune" section.
+ * Snaps to 0.1 dB, gives a haptic tick at each whole dB, and offers a one-tap reset.
  */
 @Composable
 fun TactileSliderCard(
@@ -37,126 +37,78 @@ fun TactileSliderCard(
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val extendedColors = LocalExtendedColors.current
-    val effectiveAccent = accentColor ?: MaterialTheme.colorScheme.primary
-    val formattedValue = if (value > 0) "+${"%.1f".format(value)} $unit" else "${"%.1f".format(value)} $unit"
-    val isNonZero = kotlin.math.abs(value - defaultValue) > 0.05f
+    val accent = accentColor ?: MaterialTheme.colorScheme.primary
+    val display = if (abs(value) < 0.05f) 0f else value
+    val formatted = (if (display > 0) "+" else "") + "%.1f".format(display) + " " + unit
+    val isChanged = abs(value - defaultValue) > 0.05f
+    val haptic = LocalHapticFeedback.current
+    var lastDetent by remember { mutableStateOf(value.roundToInt()) }
 
-    Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        border = CardDefaults.outlinedCardBorder().copy(
-            brush = androidx.compose.ui.graphics.SolidColor(extendedColors.cardBorder)
-        ),
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+    Column(modifier = modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Header Row: Title & dB Badge + Reset
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = title,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = subtitle,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // Reset Button (visible or enabled when modified from default)
-                    if (isNonZero) {
-                        Surface(
-                            onClick = { onValueChange(defaultValue) },
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Rounded.RestartAlt,
-                                    contentDescription = "Reset $title to $defaultValue $unit",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (isChanged) {
+                    Surface(
+                        onClick = { onValueChange(defaultValue) },
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.RestartAlt,
+                                contentDescription = "Reset $title",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
-
-                    // Value Badge
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = effectiveAccent.copy(alpha = 0.12f),
-                        modifier = Modifier.clickable { onValueChange(defaultValue) }
-                    ) {
-                        Text(
-                            text = formattedValue,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = effectiveAccent,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = accent.copy(alpha = 0.12f),
+                    modifier = Modifier.clickable { onValueChange(defaultValue) }
+                ) {
+                    Text(
+                        formatted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = accent,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
                 }
             }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Smooth Continuous Slider (No steps = 11 visual dot clutter)
-            Slider(
-                value = value,
-                onValueChange = onValueChange,
-                valueRange = valueRange,
-                colors = SliderDefaults.colors(
-                    thumbColor = effectiveAccent,
-                    activeTrackColor = effectiveAccent,
-                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics {
-                        contentDescription = "$title: $formattedValue"
-                    }
-            )
-
-            // Range Labels at extremes
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "${valueRange.start.toInt()} $unit",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    text = "${valueRange.endInclusive.toInt()} $unit",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
         }
+
+        Slider(
+            value = value,
+            onValueChange = { raw ->
+                val snapped = (raw * 10f).roundToInt() / 10f
+                if (snapped != value) {
+                    val detent = snapped.roundToInt()
+                    if (detent != lastDetent) {
+                        lastDetent = detent
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
+                    onValueChange(snapped)
+                }
+            },
+            valueRange = valueRange,
+            colors = SliderDefaults.colors(
+                thumbColor = accent,
+                activeTrackColor = accent,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "$title: $formatted" }
+        )
     }
 }

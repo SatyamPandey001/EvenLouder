@@ -12,17 +12,12 @@ import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.evenlouder.app.core.dsp.DspConfig
 import com.evenlouder.app.core.session.AudioEngineService
 import com.evenlouder.app.core.testplayer.AudioTestPlayer
-import com.evenlouder.app.ui.components.EvenLouderLoader
-import com.evenlouder.app.ui.components.LoaderVariant
 import com.evenlouder.app.ui.screens.DashboardScreen
 import com.evenlouder.app.ui.theme.EvenLouderTheme
 import kotlinx.coroutines.delay
@@ -31,6 +26,7 @@ class MainActivity : ComponentActivity() {
 
     private var audioEngineService: AudioEngineService? = null
     private val testPlayer by lazy { AudioTestPlayer(this) }
+    private var isAppReady = false
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -40,6 +36,7 @@ class MainActivity : ComponentActivity() {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val localBinder = binder as? AudioEngineService.LocalBinder
             audioEngineService = localBinder?.service
+            isAppReady = true
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -49,6 +46,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
+        splashScreen.setKeepOnScreenCondition { !isAppReady }
         super.onCreate(savedInstanceState)
 
         // Request notification permission on Android 13+
@@ -63,93 +61,68 @@ class MainActivity : ComponentActivity() {
         // Start & bind AudioEngineService
         val serviceIntent = Intent(this, AudioEngineService::class.java)
         startForegroundService(serviceIntent)
-        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+        bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE)
 
         setContent {
             var isDarkTheme by remember { mutableStateOf(true) }
-            EvenLouderTheme(darkTheme = isDarkTheme) {
-                var isAppInitializing by remember { mutableStateOf(true) }
-                var dspConfig by remember { mutableStateOf(DspConfig()) }
-                var isPlayingTestAudio by remember { mutableStateOf(false) }
-                var activeSessions by remember { mutableStateOf<List<Pair<Int, String>>>(emptyList()) }
-                var isDumpPermissionGranted by remember { mutableStateOf(false) }
+            var dspConfig by remember { mutableStateOf(DspConfig()) }
+            var isPlayingTestAudio by remember { mutableStateOf(false) }
+            var activeSessions by remember { mutableStateOf<List<Pair<Int, String>>>(emptyList()) }
+            var isDumpPermissionGranted by remember { mutableStateOf(false) }
 
-                // Application startup initialization with animated waveform
-                LaunchedEffect(Unit) {
-                    val startTime = System.currentTimeMillis()
-                    while (audioEngineService == null && (System.currentTimeMillis() - startTime) < 800) {
-                        delay(50)
-                    }
+            // Sync service state and dismiss splash as soon as connected (fallback 600ms)
+            LaunchedEffect(Unit) {
+                val startTime = System.currentTimeMillis()
+                while (audioEngineService == null && (System.currentTimeMillis() - startTime) < 600) {
+                    delay(20)
+                }
+                audioEngineService?.let { service ->
+                    dspConfig = service.currentConfig
+                    activeSessions = service.getActiveSessions()
+                    isDumpPermissionGranted = service.hasDumpPermission()
+                }
+                isAppReady = true
+
+                while (true) {
                     audioEngineService?.let { service ->
-                        dspConfig = service.currentConfig
                         activeSessions = service.getActiveSessions()
+                        dspConfig = service.currentConfig
                         isDumpPermissionGranted = service.hasDumpPermission()
                     }
-                    val elapsed = System.currentTimeMillis() - startTime
-                    if (elapsed < 500) {
-                        delay(500 - elapsed)
-                    }
-                    isAppInitializing = false
+                    delay(1000)
                 }
+            }
 
-                // Periodic poll for active sessions display
-                LaunchedEffect(isAppInitializing) {
-                    if (!isAppInitializing) {
-                        while (true) {
-                            audioEngineService?.let { service ->
-                                activeSessions = service.getActiveSessions()
-                                dspConfig = service.currentConfig
-                                isDumpPermissionGranted = service.hasDumpPermission()
+            EvenLouderTheme(darkTheme = isDarkTheme) {
+                DashboardScreen(
+                    config = dspConfig,
+                    activeSessions = activeSessions,
+                    isTestAudioPlaying = isPlayingTestAudio,
+                    isDarkTheme = isDarkTheme,
+                    isDumpPermissionGranted = isDumpPermissionGranted,
+                    onToggleTheme = { isDarkTheme = !isDarkTheme },
+                    onConfigChange = { newConfig ->
+                        dspConfig = newConfig
+                        audioEngineService?.updateConfig(newConfig)
+                    },
+                    onTestAudioToggle = {
+                        if (isPlayingTestAudio) {
+                            val sessionId = testPlayer.audioSessionId
+                            testPlayer.stop()
+                            if (sessionId > 0) {
+                                audioEngineService?.detachSession(sessionId)
                             }
-                            delay(1000)
-                        }
-                    }
-                }
-
-                Crossfade(
-                    targetState = isAppInitializing,
-                    animationSpec = tween(durationMillis = 400),
-                    label = "StartupTransition"
-                ) { initializing ->
-                    if (initializing) {
-                        EvenLouderLoader(
-                            isFullScreen = true,
-                            variant = LoaderVariant.Transparent,
-                            message = "INITIALIZING DSP AUDIO ENGINE...",
-                            size = 180.dp
-                        )
-                    } else {
-                        DashboardScreen(
-                            config = dspConfig,
-                            activeSessions = activeSessions,
-                            isTestAudioPlaying = isPlayingTestAudio,
-                            isDarkTheme = isDarkTheme,
-                            isDumpPermissionGranted = isDumpPermissionGranted,
-                            onToggleTheme = { isDarkTheme = !isDarkTheme },
-                            onConfigChange = { newConfig ->
-                                dspConfig = newConfig
-                                audioEngineService?.updateConfig(newConfig)
-                            },
-                            onTestAudioToggle = {
-                                if (isPlayingTestAudio) {
-                                    val sessionId = testPlayer.audioSessionId
-                                    testPlayer.stop()
-                                    if (sessionId > 0) {
-                                        audioEngineService?.detachSession(sessionId)
-                                    }
-                                    isPlayingTestAudio = false
-                                } else {
-                                    testPlayer.start { sessionId ->
-                                        if (sessionId > 0) {
-                                            audioEngineService?.attachSession(sessionId, "Internal Acoustic Loop")
-                                        }
-                                    }
-                                    isPlayingTestAudio = true
+                            isPlayingTestAudio = false
+                        } else {
+                            testPlayer.start { sessionId ->
+                                if (sessionId > 0) {
+                                    audioEngineService?.attachSession(sessionId, "Internal Acoustic Loop")
                                 }
                             }
-                        )
+                            isPlayingTestAudio = true
+                        }
                     }
-                }
+                )
             }
         }
     }

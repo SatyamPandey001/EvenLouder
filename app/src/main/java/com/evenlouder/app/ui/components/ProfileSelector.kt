@@ -4,6 +4,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -13,9 +15,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.evenlouder.app.core.dsp.DspConfig
@@ -23,10 +27,19 @@ import com.evenlouder.app.core.dsp.ProfileCategory
 import com.evenlouder.app.core.dsp.TuningProfile
 import com.evenlouder.app.ui.theme.LocalExtendedColors
 
+/** True when [config] holds exactly this preset's tuning values (power state ignored). */
+internal fun TuningProfile.matchesConfig(config: DspConfig): Boolean =
+    config.eqEnabled &&
+        kotlin.math.abs(config.highPassCutoffHz - this.config.highPassCutoffHz) < 0.5f &&
+        kotlin.math.abs(config.bassGainDb - this.config.bassGainDb) < 0.05f &&
+        kotlin.math.abs(config.boxinessCutDb - this.config.boxinessCutDb) < 0.05f &&
+        kotlin.math.abs(config.vocalClarityDb - this.config.vocalClarityDb) < 0.05f &&
+        kotlin.math.abs(config.trebleGainDb - this.config.trebleGainDb) < 0.05f &&
+        kotlin.math.abs(config.loudnessGainDb - this.config.loudnessGainDb) < 0.05f
+
 /**
- * Premium Filterable Grid for Acoustic Tuning Profiles.
- * Includes category filters (All, Bass Modes, Instrumental, Dolby & Dirac)
- * with dedicated vector icons, tactile selection state, and micro-speaker acoustic specs.
+ * Horizontal profile carousel with category filter and a plain-language description of the
+ * selected profile. Bypass is not listed here; the power button on the dashboard handles it.
  */
 @Composable
 fun ProfileSelector(
@@ -34,91 +47,52 @@ fun ProfileSelector(
     onSelectProfile: (TuningProfile) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val extendedColors = LocalExtendedColors.current
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val categoryScrollState = rememberScrollState()
-
     var selectedCategory by remember { mutableStateOf(ProfileCategory.ALL) }
-
-    val visibleProfiles = remember(selectedCategory) {
-        TuningProfile.values().filter { it.matchesCategory(selectedCategory) }
+    val visible = remember(selectedCategory) {
+        TuningProfile.values().filter { it != TuningProfile.BYPASS && it.matchesCategory(selectedCategory) }
     }
+    val active = TuningProfile.values().firstOrNull { it != TuningProfile.BYPASS && it.matchesConfig(currentConfig) }
+    val primary = MaterialTheme.colorScheme.primary
 
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        // Category Filter Chips
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(categoryScrollState),
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ProfileCategory.values().forEach { category ->
-                val isCatSelected = selectedCategory == category
+                val on = selectedCategory == category
                 FilterChip(
-                    selected = isCatSelected,
+                    selected = on,
                     onClick = { selectedCategory = category },
-                    label = {
-                        Text(
-                            text = category.label,
-                            fontSize = 11.sp,
-                            fontWeight = if (isCatSelected) FontWeight.Bold else FontWeight.Medium
-                        )
-                    },
+                    label = { Text(category.label, fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium) },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = primaryColor,
+                        selectedContainerColor = primary,
                         selectedLabelColor = MaterialTheme.colorScheme.onPrimary
                     )
                 )
             }
         }
 
-        // Profiles 2-Column Grid
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            visibleProfiles.chunked(2).forEach { rowProfiles ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    rowProfiles.forEach { profile ->
-                        val isSelected = if (!profile.config.enabled) {
-                            !currentConfig.enabled
-                        } else {
-                            currentConfig.enabled &&
-                                    kotlin.math.abs(currentConfig.highPassCutoffHz - profile.config.highPassCutoffHz) < 0.1f &&
-                                    kotlin.math.abs(currentConfig.vocalClarityDb - profile.config.vocalClarityDb) < 0.1f &&
-                                    kotlin.math.abs(currentConfig.bassGainDb - profile.config.bassGainDb) < 0.1f &&
-                                    kotlin.math.abs(currentConfig.boxinessCutDb - profile.config.boxinessCutDb) < 0.1f &&
-                                    kotlin.math.abs(currentConfig.trebleGainDb - profile.config.trebleGainDb) < 0.1f &&
-                                    kotlin.math.abs(currentConfig.loudnessGainDb - profile.config.loudnessGainDb) < 0.1f
-                        }
-
-                        ProfileCard(
-                            profile = profile,
-                            icon = getProfileIcon(profile),
-                            isSelected = isSelected,
-                            accentColor = if (profile == TuningProfile.BYPASS) Color(0xFFFF5252) else primaryColor,
-                            onClick = { onSelectProfile(profile) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    // Keep even width if row has only one item
-                    if (rowProfiles.size == 1) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(visible, key = { it.name }) { profile ->
+                ProfileCard(
+                    profile = profile,
+                    isSelected = profile == active,
+                    onClick = { onSelectProfile(profile) }
+                )
             }
         }
+
+        Text(
+            text = active?.description ?: "Custom tuning. Pick a profile to start from a preset.",
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
-private fun getProfileIcon(profile: TuningProfile): ImageVector = when (profile) {
+private fun iconFor(profile: TuningProfile): ImageVector = when (profile) {
     TuningProfile.DOLBY_SPATIAL -> Icons.Rounded.Movie
     TuningProfile.MAXX_BASS -> Icons.Rounded.GraphicEq
     TuningProfile.DIRAC_HIFI -> Icons.Rounded.Headphones
@@ -135,65 +109,42 @@ private fun getProfileIcon(profile: TuningProfile): ImageVector = when (profile)
 }
 
 @Composable
-private fun ProfileCard(
-    profile: TuningProfile,
-    icon: ImageVector,
-    isSelected: Boolean,
-    accentColor: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val extendedColors = LocalExtendedColors.current
-
+private fun ProfileCard(profile: TuningProfile, isSelected: Boolean, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val border = LocalExtendedColors.current.cardBorder
     OutlinedCard(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.outlinedCardColors(
-            containerColor = if (isSelected) accentColor.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
+            containerColor = if (isSelected) accent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
         ),
-        border = BorderStroke(
-            width = if (isSelected) 2.dp else 1.dp,
-            color = if (isSelected) accentColor else extendedColors.cardBorder
-        ),
-        modifier = modifier.heightIn(min = 72.dp)
+        border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) accent else border),
+        modifier = Modifier.width(150.dp).heightIn(min = 112.dp).semantics { selected = isSelected }
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(
-                        color = if (isSelected) accentColor.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(8.dp)
-                    )
+                modifier = Modifier.size(36.dp).background(
+                    color = if (isSelected) accent.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(10.dp)
+                )
             ) {
                 Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                    iconFor(profile), contentDescription = null,
+                    tint = if (isSelected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
             }
-
-            Column(modifier = Modifier.weight(1f)) {
+            Column {
                 Text(
-                    text = profile.title,
-                    fontSize = 13.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                    color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1
+                    profile.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    color = if (isSelected) accent else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = profile.subtitle,
-                    fontSize = 10.sp,
+                    profile.subtitle, fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
             }
         }

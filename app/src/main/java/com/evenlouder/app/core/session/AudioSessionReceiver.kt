@@ -19,18 +19,36 @@ class AudioSessionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent == null) return
 
-        val service = AudioEngineService.instance ?: return
+        val action = intent.action ?: return
+        val sessionId = intent.getIntExtra(AudioEffect.EXTRA_AUDIO_SESSION, 0)
+        val packageName = intent.getStringExtra(AudioEffect.EXTRA_PACKAGE_NAME)
+            ?.take(64)                       // untrusted input from other apps
+            ?.takeIf { it.isNotBlank() }
+            ?: "External Media Player"
+
+        if (sessionId <= 0) return
+
+        val service = AudioEngineService.instance
+        if (service == null) {
+            if (action == AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION) {
+                val serviceIntent = Intent(context, AudioEngineService::class.java).apply {
+                    this.action = action
+                    putExtras(intent)
+                }
+                try {
+                    context.startForegroundService(serviceIntent)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not start service from audio session broadcast", e)
+                }
+            }
+            return
+        }
+
         // Guard: Do not intercept external apps unless user explicitly enabled global hooking
         if (!service.currentConfig.globalHookEnabled) {
             Log.d(TAG, "Global hook disabled; ignoring broadcast from external app")
             return
         }
-
-        val action = intent.action ?: return
-        val sessionId = intent.getIntExtra(AudioEffect.EXTRA_AUDIO_SESSION, 0)
-        val packageName = intent.getStringExtra(AudioEffect.EXTRA_PACKAGE_NAME) ?: "External Media Player"
-
-        if (sessionId <= 0) return
 
         when (action) {
             AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION -> service.attachSession(sessionId, packageName, AudioEngineService.SessionOrigin.BROADCAST)

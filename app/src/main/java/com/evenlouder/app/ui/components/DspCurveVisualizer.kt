@@ -23,15 +23,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.evenlouder.app.core.dsp.DspConfig
+import com.evenlouder.app.core.dsp.EqLayout
+import com.evenlouder.app.core.dsp.EqPoint
 import com.evenlouder.app.ui.theme.LocalExtendedColors
+import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
+
+private const val MIN_FREQ = 20.0
+private const val MAX_FREQ = 20000.0
+private const val MIN_DB = -26f
+private const val MAX_DB = 12f
 
 /**
- * Real-time Hardware Acoustic Frequency Response Curve Visualizer.
- * Renders the accurate acoustic curve (High-Pass roll-off, Fletcher-Munson presence hump,
- * chassis de-box notch, harmonic bass punch, and treble air) computed from [DspConfig].
+ * EQ band response viewer.
+ *
+ * Unlike the previous version, this does NOT use invented bell curves. It reads the exact
+ * band table the audio engine applies ([EqLayout.build]) and draws it, interpolating
+ * smoothly between band centres on a log-frequency axis. Compression and the limiter are
+ * level-dependent, so they are not part of this graph.
  */
 @Composable
 fun DspCurveVisualizer(
@@ -44,12 +56,22 @@ fun DspCurveVisualizer(
     val surfaceColor = MaterialTheme.colorScheme.surface
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
 
-    // Smooth animation transitions when presets or sliders change
-    val animHpf by animateFloatAsState(targetValue = if (config.enabled) config.highPassCutoffHz else 20f, animationSpec = tween(250), label = "hpf")
-    val animBass by animateFloatAsState(targetValue = if (config.enabled) config.bassGainDb else 0f, animationSpec = tween(250), label = "bass")
-    val animBox by animateFloatAsState(targetValue = if (config.enabled) config.boxinessCutDb else 0f, animationSpec = tween(250), label = "box")
-    val animVocal by animateFloatAsState(targetValue = if (config.enabled) config.vocalClarityDb else 0f, animationSpec = tween(250), label = "vocal")
-    val animTreble by animateFloatAsState(targetValue = if (config.enabled) config.trebleGainDb else 0f, animationSpec = tween(250), label = "treble")
+    // Animate the real parameters, then rebuild the real band table from them
+    val animHpf by animateFloatAsState(config.highPassCutoffHz, tween(250), label = "hpf")
+    val animBass by animateFloatAsState(config.bassGainDb, tween(250), label = "bass")
+    val animBox by animateFloatAsState(config.boxinessCutDb, tween(250), label = "box")
+    val animVocal by animateFloatAsState(config.vocalClarityDb, tween(250), label = "vocal")
+    val animTreble by animateFloatAsState(config.trebleGainDb, tween(250), label = "treble")
+
+    val bands: List<EqPoint> = EqLayout.build(
+        config.copy(
+            highPassCutoffHz = animHpf,
+            bassGainDb = animBass,
+            boxinessCutDb = animBox,
+            vocalClarityDb = animVocal,
+            trebleGainDb = animTreble
+        )
+    )
 
     Column(
         modifier = modifier
@@ -58,7 +80,6 @@ fun DspCurveVisualizer(
             .background(surfaceColor)
             .padding(14.dp)
     ) {
-        // Visualizer Top Info Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -75,7 +96,7 @@ fun DspCurveVisualizer(
                         .background(if (config.enabled) extendedColors.signalGreen else Color(0xFFFF5252))
                 )
                 Text(
-                    text = if (config.enabled) "ACOUSTIC TRANSFER CURVE" else "HARDWARE BYPASS (FLAT)",
+                    text = if (config.enabled) "EQ BAND RESPONSE" else "BYPASS (FLAT)",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
@@ -83,7 +104,7 @@ fun DspCurveVisualizer(
                 )
             }
             Text(
-                text = if (config.enabled) "CEILING: -0.5 dBFS" else "LIMITER: OFF",
+                text = if (config.enabled) "LIMITER: ${"%.1f".format(config.limiterCeilingDb)} dBFS" else "LIMITER: OFF",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
@@ -93,7 +114,6 @@ fun DspCurveVisualizer(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Canvas for Frequency Response Graph
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -104,157 +124,132 @@ fun DspCurveVisualizer(
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val width = size.width
                 val height = size.height
+                val logMin = ln(MIN_FREQ)
+                val logMax = ln(MAX_FREQ)
 
-                // Frequency range: 20 Hz to 20,000 Hz (Logarithmic scale)
-                val minFreq = 20.0
-                val maxFreq = 20000.0
-                val logMin = ln(minFreq)
-                val logMax = ln(maxFreq)
-
-                fun freqToX(freq: Double): Float {
-                    val logF = ln(freq)
-                    return (((logF - logMin) / (logMax - logMin)) * width).toFloat()
-                }
-
-                // dB range: -18 dB to +8 dB
-                val minDb = -18f
-                val maxDb = 8f
-                val dbSpan = maxDb - minDb
+                fun freqToX(freq: Double): Float =
+                    (((ln(freq) - logMin) / (logMax - logMin)) * width).toFloat()
 
                 fun dbToY(db: Float): Float {
-                    val clamped = min(maxDb, max(minDb, db))
-                    val norm = (maxDb - clamped) / dbSpan
-                    return norm * height
+                    val clamped = min(MAX_DB, max(MIN_DB, db))
+                    return ((MAX_DB - clamped) / (MAX_DB - MIN_DB)) * height
                 }
 
-                val zeroY = dbToY(0f)
-                val plus6Y = dbToY(6f)
-                val minus12Y = dbToY(-12f)
-
-                // 1. Draw Grid Lines
+                // Grid
                 val gridColor = Color.White.copy(alpha = 0.06f)
-                drawLine(gridColor, Offset(0f, plus6Y), Offset(width, plus6Y), strokeWidth = 1f)
-                drawLine(Color.White.copy(alpha = 0.12f), Offset(0f, zeroY), Offset(width, zeroY), strokeWidth = 1.5f)
-                drawLine(gridColor, Offset(0f, minus12Y), Offset(width, minus12Y), strokeWidth = 1f)
-
-                val gridFreqs = listOf(100.0, 500.0, 1000.0, 5000.0, 10000.0)
-                gridFreqs.forEach { f ->
-                    val x = freqToX(f)
-                    drawLine(gridColor, Offset(x, 0f), Offset(x, height), strokeWidth = 1f)
+                listOf(6f, -12f, -24f).forEach { db ->
+                    drawLine(gridColor, Offset(0f, dbToY(db)), Offset(width, dbToY(db)), strokeWidth = 1f)
+                }
+                drawLine(
+                    Color.White.copy(alpha = 0.12f),
+                    Offset(0f, dbToY(0f)), Offset(width, dbToY(0f)),
+                    strokeWidth = 1.5f
+                )
+                listOf(100.0, 500.0, 1000.0, 5000.0, 10000.0).forEach { f ->
+                    drawLine(gridColor, Offset(freqToX(f), 0f), Offset(freqToX(f), height), strokeWidth = 1f)
                 }
 
-                // 2. Compute Synthetic Frequency Response Curve
-                // Control points:
-                // Sub-bass roll-off: < HPF drops sharply down to -18 dB
-                // 280 Hz: Bass boost
-                // 950 Hz: Boxiness notch cut
-                // 2800 Hz: Fletcher-Munson vocal presence boost
-                // 7500 Hz: Treble sparkle
-                // 18000 Hz: Gentle high rolloff
+                // Curve
                 val curvePath = Path()
                 val fillPath = Path()
-
-                val numSteps = 70
-                var first = true
-
-                for (i in 0..numSteps) {
-                    val t = i.toDouble() / numSteps
-                    val f = minFreq * Math.exp(t * (logMax - logMin))
+                val steps = 120
+                for (i in 0..steps) {
+                    val t = i.toDouble() / steps
+                    val f = MIN_FREQ * exp(t * (logMax - logMin))
+                    val db = if (config.enabled) responseDb(f, bands) else 0f
                     val x = freqToX(f)
-
-                    // Calculate response at frequency f
-                    var responseDb = 0f
-
-                    if (config.enabled) {
-                        // High-pass filter roll-off (24dB/octave slope below cutoff)
-                        if (f < animHpf) {
-                            val octavesBelow = (ln(animHpf / f) / ln(2.0)).toFloat()
-                            responseDb -= octavesBelow * 18f
-                        }
-
-                        // Harmonic Bass Punch bell at 280 Hz (Q approx 1.2)
-                        val bassDist = (ln(f / 280.0) / ln(2.0)).toFloat()
-                        responseDb += animBass * (1f / (1f + 4f * bassDist * bassDist))
-
-                        // Chassis De-Boxing notch at 950 Hz (Q approx 1.5)
-                        val boxDist = (ln(f / 950.0) / ln(2.0)).toFloat()
-                        responseDb += animBox * (1f / (1f + 5f * boxDist * boxDist))
-
-                        // Fletcher-Munson Vocal Presence bell at 2800 Hz (Q approx 1.1)
-                        val vocalDist = (ln(f / 2800.0) / ln(2.0)).toFloat()
-                        responseDb += animVocal * (1f / (1f + 3f * vocalDist * vocalDist))
-
-                        // Treble Crispness shelf/bell at 7500 Hz
-                        val trebleDist = (ln(f / 7500.0) / ln(2.0)).toFloat()
-                        responseDb += animTreble * (1f / (1f + 2.5f * trebleDist * trebleDist))
-
-                        // Natural micro-speaker drop-off above 15 kHz
-                        if (f > 15000.0) {
-                            val octAbove = (ln(f / 15000.0) / ln(2.0)).toFloat()
-                            responseDb -= octAbove * 6f
-                        }
-                    }
-
-                    val y = dbToY(responseDb)
-
-                    if (first) {
+                    val y = dbToY(db)
+                    if (i == 0) {
                         curvePath.moveTo(x, y)
                         fillPath.moveTo(x, height)
                         fillPath.lineTo(x, y)
-                        first = false
                     } else {
                         curvePath.lineTo(x, y)
                         fillPath.lineTo(x, y)
                     }
                 }
-
                 fillPath.lineTo(width, height)
                 fillPath.close()
 
-                // Draw Gradient Area under Curve
-                val fillBrush = Brush.verticalGradient(
-                    colors = if (config.enabled) {
-                        listOf(primaryColor.copy(alpha = 0.28f), primaryColor.copy(alpha = 0.02f))
-                    } else {
-                        listOf(Color.Gray.copy(alpha = 0.15f), Color.Transparent)
-                    },
-                    startY = 0f,
-                    endY = height
+                drawPath(
+                    fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = if (config.enabled) {
+                            listOf(primaryColor.copy(alpha = 0.28f), primaryColor.copy(alpha = 0.02f))
+                        } else {
+                            listOf(Color.Gray.copy(alpha = 0.15f), Color.Transparent)
+                        },
+                        startY = 0f,
+                        endY = height
+                    )
                 )
-                drawPath(fillPath, brush = fillBrush)
-
-                // Draw Active Curve Line
-                val curveColor = if (config.enabled) primaryColor else Color.Gray
                 drawPath(
                     curvePath,
-                    color = curveColor,
+                    color = if (config.enabled) primaryColor else Color.Gray,
                     style = Stroke(width = 3.5f, cap = StrokeCap.Round)
                 )
 
-                // Draw Frequency Key Markers on Curve
+                // Markers at the four tuned regions (values read from the real table)
                 if (config.enabled) {
-                    val hpfX = freqToX(animHpf.toDouble())
-                    val hpfY = dbToY(-3f)
-                    drawCircle(secondaryColor, radius = 4f, center = Offset(hpfX, hpfY))
-
-                    val vocalX = freqToX(2800.0)
-                    val vocalY = dbToY(animVocal)
-                    drawCircle(primaryColor, radius = 4.5f, center = Offset(vocalX, vocalY))
+                    listOf(280.0, 950.0, 2800.0, 7500.0).forEach { f ->
+                        drawCircle(
+                            color = secondaryColor,
+                            radius = 4.5f,
+                            center = Offset(freqToX(f), dbToY(responseDb(f, bands)))
+                        )
+                    }
+                    drawCircle(
+                        color = primaryColor,
+                        radius = 4f,
+                        center = Offset(freqToX(animHpf.toDouble()), dbToY(responseDb(animHpf.toDouble(), bands)))
+                    )
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Frequency Legend Labels
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("100 Hz (HPF)", fontSize = 10.sp, color = onSurfaceVariant, fontFamily = FontFamily.Monospace)
-            Text("500 Hz", fontSize = 10.sp, color = onSurfaceVariant, fontFamily = FontFamily.Monospace)
-            Text("2.8 kHz (Voice)", fontSize = 10.sp, color = onSurfaceVariant, fontFamily = FontFamily.Monospace)
-            Text("10 kHz (Air)", fontSize = 10.sp, color = onSurfaceVariant, fontFamily = FontFamily.Monospace)
+        // Labels positioned at their true log-frequency positions
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(14.dp)) {
+            val logSpan = ln(MAX_FREQ) - ln(MIN_FREQ)
+            listOf(
+                100.0 to "100",
+                500.0 to "500",
+                2800.0 to "2.8k",
+                10000.0 to "10k"
+            ).forEach { (f, label) ->
+                val frac = ((ln(f) - ln(MIN_FREQ)) / logSpan).toFloat()
+                Text(
+                    text = "$label Hz",
+                    fontSize = 10.sp,
+                    color = onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.offset(x = maxWidth * frac - 18.dp)
+                )
+            }
         }
     }
+}
+
+/**
+ * Response in dB at [freq], interpolated (log-frequency) between band centres.
+ * Band centre = geometric mean of the band's lower and upper edge.
+ */
+private fun responseDb(freq: Double, bands: List<EqPoint>): Float {
+    val centers = DoubleArray(bands.size)
+    var low = MIN_FREQ
+    for (i in bands.indices) {
+        val high = bands[i].edgeHz.toDouble()
+        centers[i] = sqrt(low * high)
+        low = high
+    }
+    if (freq <= centers.first()) return bands.first().gainDb
+    if (freq >= centers.last()) return bands.last().gainDb
+    for (i in 0 until bands.size - 1) {
+        if (freq <= centers[i + 1]) {
+            val t = ((ln(freq) - ln(centers[i])) / (ln(centers[i + 1]) - ln(centers[i]))).toFloat()
+            return bands[i].gainDb + (bands[i + 1].gainDb - bands[i].gainDb) * t
+        }
+    }
+    return bands.last().gainDb
 }

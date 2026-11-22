@@ -1,37 +1,55 @@
 package com.evenlouder.app.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.automirrored.rounded.CompareArrows
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.evenlouder.app.core.dsp.DspConfig
 import com.evenlouder.app.core.dsp.TuningProfile
-import com.evenlouder.app.ui.components.*
+import com.evenlouder.app.core.dsp.applyingProfile
+import com.evenlouder.app.ui.components.DspCurveVisualizer
+import com.evenlouder.app.ui.components.EvenLouderLoader
+import com.evenlouder.app.ui.components.LoaderVariant
+import com.evenlouder.app.ui.components.ProfileSelector
+import com.evenlouder.app.ui.components.TactileSliderCard
+import com.evenlouder.app.ui.components.VolumeBoostCard
+import com.evenlouder.app.ui.components.matchesConfig
 import com.evenlouder.app.ui.theme.LocalExtendedColors
 
+/**
+ * Restructured dashboard. Same signature as before, so MainActivity is unchanged.
+ *
+ *  1. Hero: status, profile name, power button, live curve, hold-to-compare, test sound
+ *  2. Profiles: horizontal carousel with plain-language description
+ *  3. Fine tune: collapsed by default
+ *  4. Settings sheet: theme, external-app hooking, ADB tip, active streams
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     config: DspConfig,
@@ -43,593 +61,395 @@ fun DashboardScreen(
     onConfigChange: (DspConfig) -> Unit,
     onTestAudioToggle: () -> Unit
 ) {
-    val scrollState = rememberScrollState()
-    val extendedColors = LocalExtendedColors.current
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val primary = MaterialTheme.colorScheme.primary
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val border = LocalExtendedColors.current.cardBorder
+    val latestConfig by rememberUpdatedState(config)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
+    var showSettings by remember { mutableStateOf(false) }
+    var showFineTune by remember { mutableStateOf(false) }
+    var comparing by remember { mutableStateOf(false) }
+
+    val activeProfile = TuningProfile.values().firstOrNull { it != TuningProfile.BYPASS && it.matchesConfig(config) }
+    val headline = when {
+        config.enabled && !config.eqEnabled && config.volumeBoostDb > 0.05f -> "Volume boost"
+        else -> activeProfile?.title ?: "Custom"
+    }
+    val onTune: (DspConfig) -> Unit = { onConfigChange(it.copy(eqEnabled = true)) }
+    val statusLine = when {
+        isTestAudioPlaying -> "Playing test sound"
+        !config.enabled -> "Original phone sound"
+        activeSessions.isNotEmpty() ->
+            "Tuning ${activeSessions.size} stream${if (activeSessions.size == 1) "" else "s"} · ${activeSessions.first().second}"
+        else -> "Waiting for audio. Play something."
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
     ) {
-        // Main Scrollable Content
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp)
-                .verticalScroll(scrollState)
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
         ) {
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 1. App Bar Header: Perfectly balanced Brand Identity + Action Button
+            // Top bar
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    EvenLouderLoader(
-                        size = 40.dp,
-                        variant = LoaderVariant.StaticIcon,
-                        contentDescription = "EvenLouder Logo"
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    EvenLouderLoader(size = 32.dp, variant = LoaderVariant.StaticIcon, contentDescription = "EvenLouder logo")
+                    Text(
+                        "EvenLouder",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onBackground
                     )
-                    Column {
-                        Text(
-                            text = "EVENLOUDER",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 1.sp,
-                            color = primaryColor
-                        )
-                        Text(
-                            text = "Android 15+ Micro-Speaker Engine",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
-
-                // Theme Toggle Action Button (Clean, unified 42x42dp squircle)
-                Surface(
-                    onClick = onToggleTheme,
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, extendedColors.cardBorder),
-                    modifier = Modifier
-                        .size(42.dp)
-                        .semantics {
-                            contentDescription = if (isDarkTheme) "Switch to light theme" else "Switch to dark theme"
-                        }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (isDarkTheme) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                IconButton(onClick = { showSettings = true }) {
+                    Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = muted)
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
-            // 2. Master DSP Bypass / Enable Switch Card (with integrated AIDL spec badge)
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (config.enabled) MaterialTheme.colorScheme.surface else Color(0xFF1E1515)
-                ),
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = if (config.enabled) extendedColors.cardBorder else Color(0x66FF5252)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(if (config.enabled) extendedColors.signalGreen else Color(0xFFFF5252))
-                            )
-                            Text(
-                                text = if (config.enabled) "DSP ENGINE ACTIVE" else "HARDWARE BYPASS",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = if (config.enabled) primaryColor else Color(0xFFFF5252)
-                            )
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(
-                                    text = "AIDL · 9 BANDS",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = secondaryColor,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = if (config.enabled) "AIDL DynamicsProcessing active on micro-speaker" else "Stock phone audio without acoustic correction",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    Switch(
-                        checked = config.enabled,
-                        onCheckedChange = { onConfigChange(config.copy(enabled = it)) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = primaryColor,
-                            checkedTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        modifier = Modifier.semantics {
-                            contentDescription = if (config.enabled) "DSP Engine enabled" else "DSP Engine disabled"
-                        }
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 3. Real-Time Hardware Acoustic Response Visualizer
-            DspCurveVisualizer(
-                config = config,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // 4. Acoustic Presets Grid
+            // Hero: status + power
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "ACOUSTIC PROFILES",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "HARDWARE-AWARE TUNING",
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-
-            ProfileSelector(
-                currentConfig = config,
-                onSelectProfile = { profile ->
-                    onConfigChange(profile.config.copy(globalHookEnabled = config.globalHookEnabled))
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        if (config.enabled) "Tuning on" else "Bypassed",
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        color = if (config.enabled) primary else muted
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        headline,
+                        fontSize = 30.sp,
+                        lineHeight = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(statusLine, fontSize = 14.sp, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-            )
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // 5. Fine Tuning Controls Section
-            Text(
-                text = "SPEAKER TUNING CALIBRATION",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Loudness Makeup Gain
-                TactileSliderCard(
-                    title = "Loudness Boost (MBC)",
-                    subtitle = "Multi-band makeup gain lifting quiet details",
-                    value = config.loudnessGainDb,
-                    valueRange = 0f..6f,
-                    defaultValue = 0f,
-                    accentColor = primaryColor,
-                    onValueChange = { onConfigChange(config.copy(loudnessGainDb = it)) }
-                )
-
-                // Vocal Presence
-                TactileSliderCard(
-                    title = "Vocal Presence (2.8 kHz)",
-                    subtitle = "Fletcher-Munson ear sensitivity compensation",
-                    value = config.vocalClarityDb,
-                    valueRange = 0f..6f,
-                    defaultValue = 0f,
-                    accentColor = primaryColor,
-                    onValueChange = { onConfigChange(config.copy(vocalClarityDb = it)) }
-                )
-
-                // Harmonic Bass Punch
-                TactileSliderCard(
-                    title = "Harmonic Bass Punch (280 Hz)",
-                    subtitle = "Psychoacoustic 2nd/3rd missing fundamental harmonics",
-                    value = config.bassGainDb,
-                    valueRange = 0f..6f,
-                    defaultValue = 0f,
-                    accentColor = secondaryColor,
-                    onValueChange = { onConfigChange(config.copy(bassGainDb = it)) }
-                )
-
-                // Chassis De-Boxing
-                TactileSliderCard(
-                    title = "Chassis De-Boxing (950 Hz)",
-                    subtitle = "Removes hollow plastic/aluminum cabinet resonance",
-                    value = config.boxinessCutDb,
-                    valueRange = -6f..0f,
-                    defaultValue = 0f,
-                    accentColor = primaryColor,
-                    onValueChange = { onConfigChange(config.copy(boxinessCutDb = it)) }
-                )
-
-                // Treble Crispness
-                TactileSliderCard(
-                    title = "Treble Crispness (7.5 kHz)",
-                    subtitle = "Air band compensating for micro-speaker roll-off",
-                    value = config.trebleGainDb,
-                    valueRange = 0f..6f,
-                    defaultValue = 0f,
-                    accentColor = primaryColor,
-                    onValueChange = { onConfigChange(config.copy(trebleGainDb = it)) }
-                )
-
-                // Sub-Bass Excursion Roll-off Card
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    ),
-                    border = CardDefaults.outlinedCardBorder().copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(extendedColors.cardBorder)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    text = "Sub-Bass Excursion Cutoff",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Drops sub-audible frequencies to save amp power",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = secondaryColor.copy(alpha = 0.12f)
-                            ) {
-                                Text(
-                                    text = "${config.highPassCutoffHz.toInt()} Hz",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = secondaryColor,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            listOf(
-                                120f to "Large Phone",
-                                140f to "Standard",
-                                160f to "Small / Compact"
-                            ).forEach { (hz, desc) ->
-                                val selected = config.highPassCutoffHz == hz
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { onConfigChange(config.copy(highPassCutoffHz = hz)) },
-                                    label = {
-                                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                                            Text(
-                                                text = "${hz.toInt()} Hz",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp
-                                            )
-                                            Text(
-                                                text = desc,
-                                                fontSize = 9.sp,
-                                                color = if (selected) Color.Black.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = secondaryColor,
-                                        selectedLabelColor = Color.Black
-                                    ),
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
+            Surface(
+                onClick = { onConfigChange(config.copy(enabled = !config.enabled)) },
+                shape = CircleShape,
+                color = if (config.enabled) primary else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.size(64.dp).semantics {
+                    contentDescription = if (config.enabled) "Turn tuning off" else "Turn tuning on"
                 }
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // 6. External Player Hook Switch Card
-            var hasCopiedAdb by remember { mutableStateOf(false) }
-            val clipboardManager = LocalClipboardManager.current
-            val adbCommand = "adb shell pm grant com.evenlouder.app android.permission.DUMP"
-
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                border = CardDefaults.outlinedCardBorder().copy(
-                    brush = androidx.compose.ui.graphics.SolidColor(extendedColors.cardBorder)
-                ),
-                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = "HOOK EXTERNAL PLAYERS",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                if (config.globalHookEnabled) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = if (isDumpPermissionGranted) extendedColors.signalGreen.copy(alpha = 0.15f) else secondaryColor.copy(alpha = 0.15f)
-                                    ) {
-                                        Text(
-                                            text = if (isDumpPermissionGranted) "ENHANCED ADB" else "BROADCAST",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = if (isDumpPermissionGranted) extendedColors.signalGreen else secondaryColor,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = if (isDumpPermissionGranted) {
-                                    "Auto-detects YouTube, Browsers, Spotify, SimpMusic via system stream dumps."
-                                } else {
-                                    "Captures standard broadcast players (Spotify, Poweramp, VLC)."
-                                },
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = config.globalHookEnabled,
-                            onCheckedChange = { onConfigChange(config.copy(globalHookEnabled = it)) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = secondaryColor,
-                                checkedTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                            ),
-                            modifier = Modifier.semantics {
-                                contentDescription = "Hook external audio players"
-                            }
-                        )
-                    }
-
-                    if (config.globalHookEnabled && !isDumpPermissionGranted) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            border = BorderStroke(1.dp, extendedColors.cardBorder),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(
-                                    text = "Tip for YouTube (Browsers), SimpMusic & Media Players:",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Non-broadcasting players require one-time ADB permission to read active audio streams. Standard players (Spotify) work without it.",
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
-                                )
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.surface,
-                                    border = BorderStroke(1.dp, extendedColors.cardBorder),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            clipboardManager.setText(AnnotatedString(adbCommand))
-                                            hasCopiedAdb = true
-                                        }
-                                        .padding(vertical = 2.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = adbCommand,
-                                            fontSize = 9.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = secondaryColor,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Icon(
-                                            imageVector = if (hasCopiedAdb) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
-                                            contentDescription = if (hasCopiedAdb) "Copied" else "Copy ADB command",
-                                            tint = if (hasCopiedAdb) extendedColors.signalGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.PowerSettingsNew, contentDescription = null,
+                        tint = if (config.enabled) MaterialTheme.colorScheme.onPrimary else muted,
+                        modifier = Modifier.size(30.dp)
+                    )
                 }
             }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 7. Attached Audio Sessions List Card
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                border = CardDefaults.outlinedCardBorder().copy(
-                    brush = androidx.compose.ui.graphics.SolidColor(extendedColors.cardBorder)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "ATTACHED AUDIO SESSIONS",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = if (activeSessions.isNotEmpty()) extendedColors.signalGreen.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Text(
-                                text = "${activeSessions.size} ATTACHED",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                color = if (activeSessions.isNotEmpty()) extendedColors.signalGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    if (activeSessions.isEmpty()) {
-                        Text(
-                            text = "No media streams currently active. Play music in any app or tap 'TEST A/B' in the bottom dock.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        activeSessions.forEach { (id, client) ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .clip(RoundedCornerShape(3.dp))
-                                            .background(extendedColors.signalGreen)
-                                    )
-                                    Text(
-                                        text = client,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Text(
-                                    text = "Session #$id",
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = primaryColor
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Bottom padding to clear sticky dock
-            Spacer(modifier = Modifier.height(96.dp))
         }
 
-        // 8. Sticky Bottom Sessions Dock
-        StickySessionDock(
+        Spacer(Modifier.height(16.dp))
+        DspCurveVisualizer(config = config, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            CompareButton(
+                available = config.enabled || comparing,
+                onHold = { holding ->
+                    comparing = holding
+                    onConfigChange(latestConfig.copy(enabled = !holding))
+                },
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedButton(
+                onClick = onTestAudioToggle,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.weight(1f).height(52.dp)
+            ) {
+                Icon(
+                    if (isTestAudioPlaying) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                    contentDescription = null, modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(if (isTestAudioPlaying) "Stop test" else "Test sound", fontSize = 14.sp)
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
+
+        // Profiles
+        Text("Profiles", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+        VolumeBoostCard(config = config, onConfigChange = onConfigChange)
+        Spacer(Modifier.height(20.dp))
+        ProfileSelector(
+            currentConfig = config,
+            onSelectProfile = { profile ->
+                onConfigChange(config.applyingProfile(profile))
+            }
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        // Fine tune (collapsed by default)
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, border),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { showFineTune = !showFineTune }.padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Fine tune", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Adjust each band yourself", fontSize = 12.sp, color = muted)
+                    }
+                    Icon(
+                        if (showFineTune) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = if (showFineTune) "Collapse fine tune" else "Expand fine tune",
+                        tint = muted
+                    )
+                }
+                AnimatedVisibility(visible = showFineTune) {
+                    Column {
+                        TactileSliderCard("Loudness", "Compressor makeup gain", config.loudnessGainDb, 0f..6f,
+                            onValueChange = { onTune(config.copy(loudnessGainDb = it)) })
+                        TactileSliderCard("Voice clarity", "Boosts 2-4 kHz", config.vocalClarityDb, -6f..10f,
+                            onValueChange = { onTune(config.copy(vocalClarityDb = it)) })
+                        TactileSliderCard("Bass punch", "Boosts ~300 Hz upper bass", config.bassGainDb, 0f..10f,
+                            onValueChange = { onTune(config.copy(bassGainDb = it)) })
+                        TactileSliderCard("Less boxy", "Cuts ~950 Hz", config.boxinessCutDb, -10f..0f,
+                            onValueChange = { onTune(config.copy(boxinessCutDb = it)) })
+                        TactileSliderCard("Treble detail", "Shelf from ~5.5 kHz up", config.trebleGainDb, -6f..10f,
+                            onValueChange = { onTune(config.copy(trebleGainDb = it)) })
+
+                        Spacer(Modifier.height(8.dp))
+                        Text("Speaker size", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Cuts deep lows the speaker cannot reproduce", fontSize = 12.sp, color = muted)
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(120f to "Large", 140f to "Standard", 160f to "Compact").forEach { (hz, label) ->
+                                FilterChip(
+                                    selected = kotlin.math.abs(config.highPassCutoffHz - hz) < 0.5f,
+                                    onClick = { onTune(config.copy(highPassCutoffHz = hz)) },
+                                    label = { Text("$label · ${hz.toInt()} Hz", fontSize = 12.sp) }
+                                )
+                            }
+                        }
+                        TextButton(
+                            onClick = {
+                                onConfigChange(config.applyingProfile(TuningProfile.DIRAC_HIFI))
+                            },
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) { Text("Reset to Balanced") }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Profiles are equalizer and compressor presets, not measurements of your phone. Trust your ears.",
+            fontSize = 12.sp, lineHeight = 16.sp, color = muted
+        )
+        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.navigationBarsPadding())
+    }
+    }
+
+    if (showSettings) {
+        SettingsSheet(
+            config = config,
             activeSessions = activeSessions,
-            isTestAudioPlaying = isTestAudioPlaying,
-            onToggleTestAudio = onTestAudioToggle,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
+            isDarkTheme = isDarkTheme,
+            isDumpPermissionGranted = isDumpPermissionGranted,
+            onToggleTheme = onToggleTheme,
+            onConfigChange = onConfigChange,
+            onDismiss = { showSettings = false }
         )
     }
+}
+
+/** Press and hold to hear the original sound; release to return to the tuned sound. */
+@Composable
+private fun CompareButton(available: Boolean, onHold: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    var held by remember { mutableStateOf(false) }
+    val availableNow by rememberUpdatedState(available)
+    val onHoldNow by rememberUpdatedState(onHold)
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = if (held) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (held) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        modifier = modifier
+            .height(52.dp)
+            .alpha(if (available) 1f else 0.4f)
+            .semantics { contentDescription = "Hold to hear the original, unprocessed sound" }
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    if (availableNow) {
+                        held = true
+                        onHoldNow(true)
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            held = false
+                            onHoldNow(false)
+                        }
+                    }
+                })
+            }
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.AutoMirrored.Rounded.CompareArrows, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (held) "Original" else "Hold to compare", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsSheet(
+    config: DspConfig,
+    activeSessions: List<Pair<Int, String>>,
+    isDarkTheme: Boolean,
+    isDumpPermissionGranted: Boolean,
+    onToggleTheme: () -> Unit,
+    onConfigChange: (DspConfig) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val border = LocalExtendedColors.current.cardBorder
+    val green = LocalExtendedColors.current.signalGreen
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    val adbCommand = "adb shell pm grant com.evenlouder.app android.permission.DUMP"
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+                .navigationBarsPadding()
+        ) {
+            Text("Settings", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(12.dp))
+
+            SettingRow("Dark theme", "Switch between dark and light", isDarkTheme) { onToggleTheme() }
+            Divider1(border)
+            SettingRow(
+                "Tune other apps",
+                if (isDumpPermissionGranted) "Enhanced detection is on: browsers, video and music apps."
+                else "Works with players that announce their audio session (Spotify, Poweramp, VLC).",
+                config.globalHookEnabled
+            ) { onConfigChange(config.copy(globalHookEnabled = it)) }
+
+            if (config.globalHookEnabled && !isDumpPermissionGranted) {
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, border),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Want browsers and video apps too?", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Run this once from a computer with USB debugging on. Tap to copy.",
+                            fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, border),
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                clipboard.setText(AnnotatedString(adbCommand))
+                                copied = true
+                            }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    adbCommand, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Icon(
+                                    if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
+                                    contentDescription = if (copied) "Copied" else "Copy command",
+                                    tint = if (copied) green else muted, modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider1(border)
+            Text("Active streams", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            if (activeSessions.isEmpty()) {
+                Text("None right now. Play audio in any app, or use Test sound.", fontSize = 13.sp, color = muted)
+            } else {
+                activeSessions.forEach { (id, client) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(client, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text("#$id", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = muted)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingRow(title: String, subtitle: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onChecked, modifier = Modifier.semantics { contentDescription = title })
+    }
+}
+
+@Composable
+private fun Divider1(color: Color) {
+    Spacer(Modifier.height(8.dp))
+    Box(Modifier.fillMaxWidth().height(1.dp).background(color))
+    Spacer(Modifier.height(8.dp))
 }

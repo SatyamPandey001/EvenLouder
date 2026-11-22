@@ -1,7 +1,9 @@
 package com.evenlouder.app.ui.components
 
+import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.graphics.drawable.AnimatedImageDrawable
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.widget.ImageView
@@ -12,7 +14,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -21,6 +26,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -118,7 +128,8 @@ fun EvenLouderLoader(
                 .fillMaxSize()
                 .background(effectiveBg)
                 .statusBarsPadding()
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .semantics { this.contentDescription = contentDescription },
             contentAlignment = Alignment.Center
         ) {
             Column(
@@ -128,7 +139,8 @@ fun EvenLouderLoader(
             ) {
                 EvenLouderAssetView(
                     assetFileName = assetFileName,
-                    modifier = Modifier.size(size)
+                    modifier = Modifier.size(size),
+                    isStatic = (variant == LoaderVariant.StaticIcon)
                 )
 
                 if (!message.isNullOrBlank()) {
@@ -149,6 +161,7 @@ fun EvenLouderLoader(
         // Inline presentation
         Box(
             modifier = modifier
+                .semantics { this.contentDescription = contentDescription }
                 .then(
                     if (background != Color.Transparent) {
                         Modifier
@@ -164,7 +177,8 @@ fun EvenLouderLoader(
             if (message.isNullOrBlank()) {
                 EvenLouderAssetView(
                     assetFileName = assetFileName,
-                    modifier = Modifier.size(size)
+                    modifier = Modifier.size(size),
+                    isStatic = (variant == LoaderVariant.StaticIcon)
                 )
             } else {
                 Column(
@@ -173,7 +187,8 @@ fun EvenLouderLoader(
                 ) {
                     EvenLouderAssetView(
                         assetFileName = assetFileName,
-                        modifier = Modifier.size(size)
+                        modifier = Modifier.size(size),
+                        isStatic = (variant == LoaderVariant.StaticIcon)
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
@@ -197,20 +212,36 @@ fun EvenLouderLoader(
 @Composable
 fun EvenLouderAssetView(
     assetFileName: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isStatic: Boolean = false
 ) {
     val context = LocalContext.current
 
     val drawableState = produceState<Drawable?>(initialValue = null, key1 = assetFileName) {
-        value = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val source = ImageDecoder.createSource(context.assets, assetFileName)
-                ImageDecoder.decodeDrawable(source)
-            } else {
-                null
+        // Decode off the main thread: GIF decoding on Main causes startup jank
+        value = withContext(Dispatchers.IO) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val source = ImageDecoder.createSource(context.assets, assetFileName)
+                    ImageDecoder.decodeDrawable(source)
+                } else {
+                    val stream = context.assets.open(assetFileName)
+                    val bitmap = BitmapFactory.decodeStream(stream)
+                    stream.close()
+                    BitmapDrawable(context.resources, bitmap)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                try {
+                    val stream = context.assets.open(assetFileName)
+                    val bitmap = BitmapFactory.decodeStream(stream)
+                    stream.close()
+                    BitmapDrawable(context.resources, bitmap)
+                } catch (e2: Exception) {
+                    null
+                }
             }
-        } catch (e: Exception) {
-            null
         }
     }
 
@@ -248,6 +279,13 @@ fun EvenLouderAssetView(
                     drawable.start()
                 }
             },
+            modifier = modifier
+        )
+    } else if (isStatic || assetFileName.endsWith(".png")) {
+        Icon(
+            imageVector = Icons.Rounded.GraphicEq,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = modifier
         )
     } else {

@@ -1,24 +1,23 @@
 package com.evenlouder.app.core.dsp
 
 /**
- * Audio DSP parameters calibrated for smartphone micro-speakers on Android 15+.
+ * Audio DSP parameters for phone micro-speakers.
+ * Ranges: bass 0..10, box -10..0, vocal -6..10, treble -6..10, loudness 0..6, boost 0..12 dB.
  */
 data class DspConfig(
-    val enabled: Boolean = true,
-    val highPassCutoffHz: Float = 135f,
-    val bassGainDb: Float = 3.5f,        // 280 Hz harmonic punch / MaxxBass resonance (0 to 6 dB)
-    val boxinessCutDb: Float = -2.5f,    // 950 Hz anti-boxiness / chassis resonance cut (-6 to 0 dB)
-    val vocalClarityDb: Float = 4.5f,    // 2.8 kHz Fletcher-Munson presence (0 to 6 dB)
-    val trebleGainDb: Float = 3.5f,      // 7.5 kHz crispness & detail (0 to 6 dB)
-    val loudnessGainDb: Float = 4.0f,    // Multi-band compressor makeup gain (0 to 6 dB)
-    val limiterCeilingDb: Float = -0.5f, // Brickwall safety ceiling
-    val globalHookEnabled: Boolean = true // Hook external media players by default
+    val enabled: Boolean = true,          // master power (false = full bypass)
+    val eqEnabled: Boolean = true,        // false = "boost only" (no tone shaping, keeps the low cut)
+    val highPassCutoffHz: Float = 140f,
+    val bassGainDb: Float = 3.0f,
+    val boxinessCutDb: Float = -3.0f,
+    val vocalClarityDb: Float = 3.0f,
+    val trebleGainDb: Float = 3.0f,
+    val loudnessGainDb: Float = 2.0f,
+    val limiterCeilingDb: Float = -0.5f,
+    val volumeBoostDb: Float = 0f,        // extra loudness pushed into the limiter
+    val globalHookEnabled: Boolean = true
 ) {
     companion object {
-        const val PRE_EQ_BANDS = 6
-        const val MBC_BANDS = 3
-        const val POST_EQ_BANDS = 0
-        const val MAX_ALLOWED_AIDL_BANDS = 32
-        const val TOTAL_CONFIGURED_BANDS = PRE_EQ_BANDS + MBC_BANDS + POST_EQ_BANDS // 9 < 32
+        const val MAX_BOOST_DB = 12f
     }
 }
